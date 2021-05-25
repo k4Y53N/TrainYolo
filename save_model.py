@@ -92,6 +92,6 @@ def model_test(config):
 
 
 if __name__ == '__main__':
-    from makeConfig import config_parser
-    cfg = config_parser('cfg\\person.cfg')
+    from makeConfig import JSON_parser
+    cfg = JSON_parser('cfg\\person.cfg')
     save_tf(cfg)

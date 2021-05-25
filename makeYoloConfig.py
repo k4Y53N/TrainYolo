@@ -1,49 +1,14 @@
 import json
-import numpy as np
 import argparse
+import numpy as np
 import threading
+import configparser
 from pathlib import Path
 import logging
 from os import path
-from tqdm import tqdm
 from sklearn.cluster import KMeans
 
-"""
-    Convert coco dataset to yolo format
-"""
-
-
-def JSON_parser(cfg_path):
-    """
-    :param cfg_path: config file path
-    :return: config
-    """
-    with open(cfg_path, 'r') as f:
-        config = json.load(f)
-    return config
-
-
-def write_config(config: dict):
-    """
-    :param config: config dict
-    :return: None
-    """
-    cfg_path = path.join('cfg', config['name']) + '.cfg'
-    if path.exists(cfg_path):
-        while True:
-            ans = input('config file %s already exist , replace old config file? Y or N\n' % cfg_path)
-            if ans == "Y" or ans == 'y':
-                with open(cfg_path, 'w') as cfg:
-                    cfg.write(json.dumps(config))
-                    print('save new config file %s' % cfg_path)
-                    break
-            elif ans == "N" or ans == "n":
-                print('config file %s did not save' % cfg_path)
-                break
-    else:
-        with open(cfg_path, 'w') as cfg:
-            cfg.write(json.dumps(config))
-            print('write config file %s' % cfg_path)
+logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
 
 
 def load_class(class_path):
@@ -51,33 +16,53 @@ def load_class(class_path):
     :param class_path: classes file path
     :return: classes
     """
-    if not path.exists(class_path):
-        raise Exception('Classes file path does not effective')
-    with open(class_path, 'r') as f:
+    class_path = Path(class_path)
+    if not class_path.exists():
+        raise Exception('Classes file path does not exists.')
+
+    with class_path.open('r') as f:
         classes = [line.strip() for line in f.readlines()]
     return classes
 
 
-def load_JSON_file(anno_file, classes):
+def write_config(config: dict):
     """
-    :param anno_file: coco dataset annotation file path
+    :param config: config dict
+    :return: None
+    """
+
+    config_save_path = Path('configs') / (config['name'] + '.cfg')
+    if config_save_path.exists():
+        logging.warning(f'file : {config_save_path} is exist and will be replace.')
+    with config_save_path.open('w') as f:
+        json_object = json.dumps(config)
+        f.write(json_object)
+
+
+def load_JSON_file(anno_path: str, classes):
+    """
+    :param anno_path: coco dataset annotation file path
     :param classes: classes name of dataset
     :return: dict:{
                 Image_id:{
                     'file_name':name
+                    'width':image width
+                    'height':image height
                     'items':[  ->list
                         {
                             'bbox':bounding box
                             'category_name':class name of bbox
                         }
                     ]
-                }
+                },
+                Classes:[classes name]
             }
     """
 
-    with open(anno_file, 'r') as f:
-        print('load %s...' % anno_file)
+    with open(anno_path, 'r') as f:
+        print('load %s...' % anno_path)
         data = json.load(f)
+        np.random.shuffle(data['images'])
 
     cats = {
         cat['id']: cat['name']
@@ -88,6 +73,8 @@ def load_JSON_file(anno_file, classes):
     imgs = {
         img['id']: {
             'file_name': img['file_name'],
+            'width': img['width'],
+            'height': img['height'],
             'items': []
         }
         for img in data['images']
@@ -101,7 +88,10 @@ def load_JSON_file(anno_file, classes):
                 'category_name': cats[anno['category_id']]
             }
         )
-    return imgs
+
+    cats = [name for name in cats.values()]
+
+    return imgs, cats
 
 
 def get_anchor_box(w_h, tiny):
@@ -129,51 +119,68 @@ def get_anchor_box(w_h, tiny):
     return arranged.reshape(-1).tolist()
 
 
-def write_coco2yolo_file(coco_file, save_dir, classes, total, save_file_path, ):
+def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_path, set_size, class_file_name='',
+                         train=False):
     """
-    :param coco_file: coco annotations file path
-    :param save_dir: yolo format save path
-    :param classes: classes name in coco dataset
-    :param total: how many image need to write
-    :param save_file_path: yolo format file save path
+    :param anno_file_path: coco annotations file path
+    :param data_set_dir: yolo format save path
+    :param classes: [classes name]
+    :param set_size: how many image need to write
+    :param yolo_file_save_path: yolo format file save path
+    :param class_file_name: class json file name
+    :param train: if train will write class name to json file save in data/classes/class_file_name
     :return: None
     """
 
-    images = load_JSON_file(coco_file, classes)
-    classes = {value: key for key, value in enumerate(classes)}
-    data = open(save_file_path, 'w')
+    anno_file_path = Path(anno_file_path)
+    data_set_dir = Path(data_set_dir)
+    yolo_file_save_path = Path(yolo_file_save_path)
+
+    if not anno_file_path.is_file():
+        logging.error(f'{anno_file_path} does not exists')
+        raise FileNotFoundError
+    if not data_set_dir.is_dir():
+        logging.error(f'dir: {data_set_dir} not effective')
+        raise NotADirectoryError(f'{data_set_dir}')
+    if yolo_file_save_path.is_file():
+        logging.warning(f'{yolo_file_save_path} will be replace')
+
+    yolo_file = yolo_file_save_path.open('w')
+    images, classes = load_JSON_file(anno_file_path, classes)
+    classes = {
+        name: index
+        for index, name in enumerate(classes)
+    }
     done = 0
-    w_h = []
-    tbar = tqdm(total=total)
-    if not path.isdir(save_dir):
-        raise Exception(f'Save dir: %s does not effective dir.' % (save_dir))
 
     for img in images.values():
-        file_path = path.join(save_dir, img['file_name'])
-        if done >= total:
+        file_path = Path(data_set_dir) / img['file_name']
+        if done >= set_size:
             break
-        if not path.isfile(file_path):
+        if not file_path.exists():
             continue
         if len(img['items']) > 0:
-            file_path += ' '
-            data.write(file_path)
+            yolo_file.write(str(file_path))
+            yolo_file.write(' ')
             for item in img['items']:
                 xmin = int(item['bbox'][0])
                 ymin = int(item['bbox'][1])
                 xmax = xmin + int(item['bbox'][2])
                 ymax = ymin + int(item['bbox'][3])
-                w_h.append([xmax - xmin, ymax - ymin])
                 xmin, ymin, xmax, ymax = str(xmin), str(ymin), str(xmax), str(ymax)
                 label = str(classes[item['category_name']])
-                data.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
-            data.write('\n')
-            tbar.update(1)
+                yolo_file.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
+            yolo_file.write('\n')
             done += 1
-    data.close()
-    return w_h
+    yolo_file.close()
+    if train:
+        class_file = Path('data') / 'classes' / (class_file_name + '.txt')
+        with class_file.open('w') as f:
+            f.write(json.dumps(classes))
+    logging.info(f'file {yolo_file_save_path} has {done} images')
 
 
-def Main(args: argparse.ArgumentParser.parse_args):
+def Main(args):
     config = {
         # path
         'name': None,
@@ -230,6 +237,48 @@ def Main(args: argparse.ArgumentParser.parse_args):
     }
 
     # path
+    paths = configparser.ConfigParser()
+    paths.read('sys.ini')
+    train_set_dir = paths['Paths']['train_set_dir']
+    train_anno_path = paths['Paths']['train_annotation_path']
+    val_set_dir = paths['Paths']['train_set_dir']
+    val_anno_path = paths['Paths']['train_annotation_path']
+
+    name = args.name
+    model_path = Path('checkpoints') / name
+    weight_path = Path('checkpoints') / 'weights' / (name + '.h5')
+    classes = load_class(args.class_path)
+    train_yolo_format_path = Path('data') / 'Sets' / 'train' / (name + '.txt')
+    val_yolo_format_path = Path('data') / 'Sets' / 'test' / (name + '.txt')
+
+    t1 = threading.Thread(
+        target=write_coco2yolo_file,
+        args=(
+            str(train_anno_path),
+            classes,
+            train_set_dir,
+            train_yolo_format_path,
+            args.max_train,
+            name,
+            True
+        )
+    )
+
+    t2 = threading.Thread(
+        target=write_coco2yolo_file,
+        args=(
+            str(val_anno_path),
+            classes,
+            val_set_dir,
+            val_yolo_format_path,
+            args.max_test,
+        )
+    )
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
     config['name'] = args.name
     config['model_path'] = path.join('checkpoints', args.name)
     config['weight_path'] = path.join('checkpoints', 'weights', args.name) + '.h5'
@@ -238,7 +287,7 @@ def Main(args: argparse.ArgumentParser.parse_args):
     config['model_type'] = args.model_type
     config['size'] = args.size
     config['tiny'] = args.tiny
-    config['YOLO']['CLASSES'] = load_class(args.class_path)
+    config['YOLO']['CLASSES'] = []
     config['YOLO']['INPUT_SIZE'] = args.size
     # train
     config['TRAIN']['INPUT_SIZE'] = args.size
@@ -247,20 +296,14 @@ def Main(args: argparse.ArgumentParser.parse_args):
     config['TEST']['INPUT_SIZE'] = args.size
     config['TEST']['ANNOT_PATH'] = path.join('data', 'tests', args.name) + '.txt'
 
-    w_h = write_coco2yolo_file(args.train_file, args.train_dir, config['YOLO']['CLASSES'], args.max_train,
-                               config['TRAIN']['ANNOT_PATH'])
-    write_coco2yolo_file(args.val_file, args.val_dir, config['YOLO']['CLASSES'], args.max_val,
-                         config['TEST']['ANNOT_PATH'])
-    anchor = get_anchor_box(w_h, args.tiny)
-    anchor_tiny = get_anchor_box(w_h, args.tiny)
-    config['YOLO']['ANCHORS'] = anchor
-    config['YOLO']['ANCHORS_V3'] = anchor
-    config['YOLO']['ANCHORS_TINY'] = anchor_tiny
-    config['TRAIN']['PRETRAIN'] = args.pretrain
+    # anchor = get_anchor_box(w_h, args.tiny)
+    # anchor_tiny = get_anchor_box(w_h, args.tiny)
+    # config['YOLO']['ANCHORS'] = anchor
+    # config['YOLO']['ANCHORS_V3'] = anchor
+    # config['YOLO']['ANCHORS_TINY'] = anchor_tiny
+    # config['TRAIN']['PRETRAIN'] = args.pretrain
 
     write_config(config)
-    """for k, v in config.items():
-        print(k, ' : ', v)"""
 
 
 if __name__ == '__main__':

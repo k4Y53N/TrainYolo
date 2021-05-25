@@ -6,7 +6,7 @@ from core.dataset import Dataset
 import numpy as np
 from core import utils
 from core.utils import freeze_all, unfreeze_all
-from makeConfig import config_parser
+from makeConfig import JSON_parser
 import argparse
 
 """flags.DEFINE_string('model', 'yolov4', 'yolov4, yolov3')
@@ -21,7 +21,7 @@ def main(config_path):
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
     """
-    config = config_parser(config_path)
+    config = JSON_parser(config_path)
 
     trainset = Dataset(config, is_training=True)
     testset = Dataset(config, is_training=False)
