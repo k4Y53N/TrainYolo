@@ -63,6 +63,7 @@ def load_JSON_file(anno_path: str, classes):
         print('load %s...' % anno_path)
         data = json.load(f)
         np.random.shuffle(data['images'])
+        np.random.shuffle(data['annotations'])
 
     cats = {
         cat['id']: cat['name']
@@ -100,10 +101,7 @@ def get_anchor_box(w_h, tiny):
     :param tiny: if tiny = true , k =6 , else k =3
     :return: cluster centers (anchor box)
     """
-    if tiny:
-        k = 6
-    else:
-        k = 9
+    k = 6 if tiny else 9
 
     x = np.array(w_h)
     kmeans = KMeans(n_clusters=k).fit(x)
@@ -117,6 +115,31 @@ def get_anchor_box(w_h, tiny):
         arranged[i] = cluster[arg]
 
     return arranged.reshape(-1).tolist()
+
+
+def cal_anchors(set_file_path):
+    """
+    calculate anchor box
+    @param set_file_path: dataset annotation file path
+    @return: [[anchor box with k=9], [anchor box with k=6]]
+    """
+    set_file_path = Path(set_file_path)
+
+    if not set_file_path.is_file():
+        raise FileNotFoundError(f'file {set_file_path} is not exists')
+    f = set_file_path.open('r')
+
+    w_h = [
+        [int(bbox[2]) - int(bbox[0]), int(bbox[3]) - int(bbox[1])]
+        for line in f.readlines()
+        for obj in line.strip().split(' ', )[1:]
+        for bbox in [obj.split(',')]
+    ]
+    f.close()
+    return [
+        get_anchor_box(w_h, tiny=False),
+        get_anchor_box(w_h, tiny=True)
+    ]
 
 
 def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_path, set_size, class_file_name='',
@@ -175,6 +198,8 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
     yolo_file.close()
     if train:
         class_file = Path('data') / 'classes' / (class_file_name + '.txt')
+        if class_file.exists():
+            logging.warning(f'file {class_file} will be replace')
         with class_file.open('w') as f:
             f.write(json.dumps(classes))
     logging.info(f'file {yolo_file_save_path} has {done} images')
@@ -235,21 +260,24 @@ def Main(args):
             'IOU_THRESHOLD': 0.5,
         },
     }
-
+    name = args.name
     # path
     paths = configparser.ConfigParser()
     paths.read('sys.ini')
     train_set_dir = paths['Paths']['train_set_dir']
     train_anno_path = paths['Paths']['train_annotation_path']
-    val_set_dir = paths['Paths']['train_set_dir']
-    val_anno_path = paths['Paths']['train_annotation_path']
+    val_set_dir = paths['Paths']['val_set_dir']
+    val_anno_path = paths['Paths']['val_annotation_path']
 
-    name = args.name
-    model_path = Path('checkpoints') / name
-    weight_path = Path('checkpoints') / 'weights' / (name + '.h5')
-    classes = load_class(args.class_path)
-    train_yolo_format_path = Path('data') / 'Sets' / 'train' / (name + '.txt')
-    val_yolo_format_path = Path('data') / 'Sets' / 'test' / (name + '.txt')
+    model_path = Path(paths['Save_dir']['checkpoints']) / name
+    weight_path = Path(paths['Save_dir']['weights']) / (name + '.h5')
+    train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
+    val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
+    configs_dir = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
+
+    train_epoch_size = args.train_size
+    val_epoch_size = args.val_size
+    classes = load_class(args.class_file)
 
     t1 = threading.Thread(
         target=write_coco2yolo_file,
@@ -257,8 +285,8 @@ def Main(args):
             str(train_anno_path),
             classes,
             train_set_dir,
-            train_yolo_format_path,
-            args.max_train,
+            train_yolo_format_save_path,
+            train_epoch_size,
             name,
             True
         )
@@ -270,63 +298,58 @@ def Main(args):
             str(val_anno_path),
             classes,
             val_set_dir,
-            val_yolo_format_path,
-            args.max_test,
+            val_yolo_format_save_path,
+            val_epoch_size,
         )
     )
     t1.start()
     t2.start()
     t1.join()
     t2.join()
+    classes_file_path = Path('data') / classes / name
+    anchor = cal_anchors(str(train_yolo_format_save_path))
+    classes = load_JSON_file(str(classes_file_path))
+    classes = [_class for _class in classes.keys()]
 
-    config['name'] = args.name
-    config['model_path'] = path.join('checkpoints', args.name)
-    config['weight_path'] = path.join('checkpoints', 'weights', args.name) + '.h5'
-    # yolo
-    config['frame_work'] = args.frame_work
-    config['model_type'] = args.model_type
-    config['size'] = args.size
-    config['tiny'] = args.tiny
-    config['YOLO']['CLASSES'] = []
-    config['YOLO']['INPUT_SIZE'] = args.size
-    # train
-    config['TRAIN']['INPUT_SIZE'] = args.size
-    config['TRAIN']['ANNOT_PATH'] = path.join('data', 'annotations', args.name) + '.txt'
-    # test
-    config['TEST']['INPUT_SIZE'] = args.size
-    config['TEST']['ANNOT_PATH'] = path.join('data', 'tests', args.name) + '.txt'
 
-    # anchor = get_anchor_box(w_h, args.tiny)
-    # anchor_tiny = get_anchor_box(w_h, args.tiny)
-    # config['YOLO']['ANCHORS'] = anchor
-    # config['YOLO']['ANCHORS_V3'] = anchor
-    # config['YOLO']['ANCHORS_TINY'] = anchor_tiny
-    # config['TRAIN']['PRETRAIN'] = args.pretrain
+"""   config['name'] = name
+   config['model_path'] = path.join('checkpoints', args.name)
+   config['weight_path'] = path.join('checkpoints', 'weights', args.name) + '.h5'
+   # yolo
+   config['frame_work'] = args.frame_work
+   config['model_type'] = args.model_type
+   config['size'] = args.size
+   config['tiny'] = args.tiny
+   config['YOLO']['CLASSES'] = []
+   config['YOLO']['INPUT_SIZE'] = args.size
+   # train
+   config['TRAIN']['INPUT_SIZE'] = args.size
+   config['TRAIN']['ANNOT_PATH'] = path.join('data', 'annotations', args.name) + '.txt'
+   # test
+   config['TEST']['INPUT_SIZE'] = args.size
+   config['TEST']['ANNOT_PATH'] = path.join('data', 'tests', args.name) + '.txt'"""
 
-    write_config(config)
+# anchor = get_anchor_box(w_h, args.tiny)
+# anchor_tiny = get_anchor_box(w_h, args.tiny)
+# config['YOLO']['ANCHORS'] = anchor
+# config['YOLO']['ANCHORS_V3'] = anchor
+# config['YOLO']['ANCHORS_TINY'] = anchor_tiny
+# config['TRAIN']['PRETRAIN'] = args.pretrain
 
+# write_config(config)
 
 if __name__ == '__main__':
-    paser = argparse.ArgumentParser(description='Make yolo config')
-    paser.add_argument('-name', type=str, nargs='?', const=1, help='Model name')
-    paser.add_argument('-size', type=int, nargs='?', const=1, default=416,
-                       help='Detect image size in [320, 352, 384, 416, 448, 480, 512, 544, 576, 608]')
-    paser.add_argument('-model_type', type=str, nargs='?', const=1, default='yolov4',
-                       help='Type of model \'yolov4\' or \'yolov3\'')
-    paser.add_argument('-frame_work', type=str, nargs='?', const=1, default='tf', help='Work environment')
-    paser.add_argument('-tiny', type=bool, nargs='?', const=1, default=False, help='Tiny model \'True\' or \'False\'')
-    paser.add_argument('-class_path', type=str, nargs='?', const=1, default='', help='Classes file path')
-
-    paser.add_argument('-train_dir', type=str, nargs='?', const=1, default=r'E:\TMPPPP\train2014\train2014',
-                       help='Train data dir')
-    paser.add_argument('-val_dir', type=str, nargs='?', const=1, default=r'E:\TMPPPP\val2014\val2014',
-                       help='Val data dir')
-    paser.add_argument('-train_file', type=str, nargs='?', const=1, default='instances_train2014.json',
-                       help='COCO Train Annotation file path')
-    paser.add_argument('-val_file', type=str, nargs='?', const=1, default='instances_val2014.json',
-                       help='COCO Val Annotation file path')
-    paser.add_argument('-max_train', type=int, nargs='?', const=1, default=1500, help='How many images want to train')
-    paser.add_argument('-max_val', type=int, nargs='?', const=1, default=300, help='How many images want to test')
-    paser.add_argument('-pretrain', type=str, nargs='?', const=1, default='', help='Pretrain weights path')
-    args = paser.parse_args()
+    parser = argparse.ArgumentParser(description='test')
+    parser.add_argument('-n', '--name', required=False, type=str, help='Model name')
+    parser.add_argument('-c', '--class', required=True, type=str, metavar='file path', help='classes name file path')
+    parser.add_argument('-s', '--size', type=int, default=416,
+                        choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
+                        help='Image input size')
+    parser.add_argument('-m', '--model', type=str, default='yolov4', choices=['yolov4', 'yolov3'], help='Model type')
+    parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
+                        help='Frame work')
+    parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
+    parser.add_argument('--max_train', type=int, default=1500, help='Train epoch size')
+    parser.add_argument('--max_val', type=int, default=300, help='Val epoch size')
+    args = parser.parse_args()
     Main(args)
