@@ -1,11 +1,11 @@
 import json
+from test import printdic
 import argparse
 import numpy as np
 import threading
 import configparser
 from pathlib import Path
 import logging
-from os import path
 from sklearn.cluster import KMeans
 
 logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
@@ -69,6 +69,9 @@ def load_JSON_file(anno_path: str, classes):
         cat['id']: cat['name']
         for cat in data['categories'] if cat['name'] in classes
     }
+    if len(cats) <= 0:
+        raise Exception('Cant fine any classes in annotation file')
+
     annos = [anno for anno in data['annotations'] if anno['category_id'] in cats.keys()]
 
     imgs = {
@@ -277,7 +280,7 @@ def Main(args):
 
     train_epoch_size = args.train_size
     val_epoch_size = args.val_size
-    classes = load_class(args.class_file)
+    classes = load_class(args.classes)
 
     t1 = threading.Thread(
         target=write_coco2yolo_file,
@@ -289,7 +292,7 @@ def Main(args):
             train_epoch_size,
             name,
             True
-        )
+        ), daemon=True
     )
 
     t2 = threading.Thread(
@@ -300,17 +303,24 @@ def Main(args):
             val_set_dir,
             val_yolo_format_save_path,
             val_epoch_size,
-        )
+        ), daemon=True
     )
     t1.start()
     t2.start()
     t1.join()
     t2.join()
-    classes_file_path = Path('data') / classes / name
+    classes_file_path = Path('data') / 'classes' / (name + '.txt')
+    if not classes_file_path.is_file():
+        raise Exception('Cant handle this data set please check out the classes name file')
+    with classes_file_path.open() as f:
+        classes = json.load(f)
     anchor = cal_anchors(str(train_yolo_format_save_path))
-    classes = load_JSON_file(str(classes_file_path))
     classes = [_class for _class in classes.keys()]
-
+    print(classes)
+    print(anchor)
+    print('-------------------config-------------------')
+    printdic(config)
+    print('--------------------END---------------------')
 
 """   config['name'] = name
    config['model_path'] = path.join('checkpoints', args.name)
@@ -341,7 +351,7 @@ def Main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='test')
     parser.add_argument('-n', '--name', required=False, type=str, help='Model name')
-    parser.add_argument('-c', '--class', required=True, type=str, metavar='file path', help='classes name file path')
+    parser.add_argument('-c', '--classes', required=True, type=str, metavar='file path', help='classes name file path')
     parser.add_argument('-s', '--size', type=int, default=416,
                         choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
                         help='Image input size')
@@ -349,7 +359,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('--max_train', type=int, default=1500, help='Train epoch size')
-    parser.add_argument('--max_val', type=int, default=300, help='Val epoch size')
+    parser.add_argument('--train_size', type=int, default=1500, help='Train epoch size')
+    parser.add_argument('--val_size', type=int, default=300, help='Val epoch size')
     args = parser.parse_args()
     Main(args)
