@@ -1,12 +1,12 @@
 import json
-from test import printdic
 import argparse
 import numpy as np
 import threading
 import configparser
-from pathlib import Path
 import logging
 from sklearn.cluster import KMeans
+from pathlib import Path
+from scripts.utils import printdic
 
 logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
 
@@ -25,18 +25,20 @@ def load_class(class_path):
     return classes
 
 
-def write_config(config: dict):
+def write_config(config: dict, dst):
     """
     :param config: config dict
+    :param dst: destination
     :return: None
     """
 
-    config_save_path = Path('configs') / (config['name'] + '.cfg')
+    config_save_path = Path(dst)
     if config_save_path.exists():
         logging.warning(f'file : {config_save_path} is exist and will be replace.')
     with config_save_path.open('w') as f:
         json_object = json.dumps(config)
         f.write(json_object)
+    logging.info(f'Config save at {config_save_path}')
 
 
 def load_JSON_file(anno_path: str, classes):
@@ -276,7 +278,7 @@ def Main(args):
     weight_path = Path(paths['Save_dir']['weights']) / (name + '.h5')
     train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
     val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
-    configs_dir = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
+    config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
 
     train_epoch_size = args.train_size
     val_epoch_size = args.val_size
@@ -316,42 +318,33 @@ def Main(args):
         classes = json.load(f)
     anchor = cal_anchors(str(train_yolo_format_save_path))
     classes = [_class for _class in classes.keys()]
-    print(classes)
-    print(anchor)
-    print('-------------------config-------------------')
+
+    config['name'] = name
+    config['model_path'] = str(model_path)
+    config['weight_path'] = str(weight_path)
+    config['frame_work'] = args.frame_work
+    config['size'] = args.size
+    config['model_type'] = args.model
+    config['tiny'] = args.tiny
+    config['YOLO']['CLASSES'] = classes
+    config['YOLO']['ANCHORS'] = anchor[0]
+    config['YOLO']['ANCHORS_V3'] = anchor[0]
+    config['YOLO']['ANCHORS_TINY'] = anchor[1]
+    config['TRAIN']['ANNOT_PATH'] = str(train_anno_path)
+    config['TRAIN']['INPUT_SIZE'] = args.size
+    config['TEST']['ANNOT_PATH'] = str(val_anno_path)
+    config['TEST']['INPUT_SIZE'] = args.size
+
+    print('-------------------CONFIG-------------------')
     printdic(config)
     print('--------------------END---------------------')
+    write_config(config, dst=str(config_save_path))
 
-"""   config['name'] = name
-   config['model_path'] = path.join('checkpoints', args.name)
-   config['weight_path'] = path.join('checkpoints', 'weights', args.name) + '.h5'
-   # yolo
-   config['frame_work'] = args.frame_work
-   config['model_type'] = args.model_type
-   config['size'] = args.size
-   config['tiny'] = args.tiny
-   config['YOLO']['CLASSES'] = []
-   config['YOLO']['INPUT_SIZE'] = args.size
-   # train
-   config['TRAIN']['INPUT_SIZE'] = args.size
-   config['TRAIN']['ANNOT_PATH'] = path.join('data', 'annotations', args.name) + '.txt'
-   # test
-   config['TEST']['INPUT_SIZE'] = args.size
-   config['TEST']['ANNOT_PATH'] = path.join('data', 'tests', args.name) + '.txt'"""
-
-# anchor = get_anchor_box(w_h, args.tiny)
-# anchor_tiny = get_anchor_box(w_h, args.tiny)
-# config['YOLO']['ANCHORS'] = anchor
-# config['YOLO']['ANCHORS_V3'] = anchor
-# config['YOLO']['ANCHORS_TINY'] = anchor_tiny
-# config['TRAIN']['PRETRAIN'] = args.pretrain
-
-# write_config(config)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='test')
+    parser = argparse.ArgumentParser(description='Make yolo config and preprocess dataset')
     parser.add_argument('-n', '--name', required=False, type=str, help='Model name')
-    parser.add_argument('-c', '--classes', required=True, type=str, metavar='file path', help='classes name file path')
+    parser.add_argument('-c', '--classes', required=True, type=str, help='classes name file path')
     parser.add_argument('-s', '--size', type=int, default=416,
                         choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
                         help='Image input size')
@@ -359,7 +352,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('--train_size', type=int, default=1500, help='Train epoch size')
-    parser.add_argument('--val_size', type=int, default=300, help='Val epoch size')
+    parser.add_argument('-ts', '--train_size', type=int, default=1500, help='Train epoch size')
+    parser.add_argument('-vs', '--val_size', type=int, default=300, help='Val epoch size')
     args = parser.parse_args()
     Main(args)
