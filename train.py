@@ -9,18 +9,8 @@ from core.utils import freeze_all, unfreeze_all
 from makeConfig import JSON_parser
 import argparse
 
-"""flags.DEFINE_string('model', 'yolov4', 'yolov4, yolov3')
-flags.DEFINE_string('weights', './scripts/yolov4.weights', 'pretrained weights')
-flags.DEFINE_boolean('tiny', False, 'yolo or yolo-tiny')"""
-
 
 def main(config_path):
-    """
-    physical_devices = tf.config.experimental.list_physical_devices('GPU')
-    if len(physical_devices) > 0:
-        tf.config.experimental.set_memory_growth(physical_devices[0], True)
-
-    """
     config = JSON_parser(config_path)
 
     trainset = Dataset(config, is_training=True)
@@ -69,7 +59,7 @@ def main(config_path):
             bbox_tensors.append(bbox_tensor)
 
     model = tf.keras.Model(input_layer, bbox_tensors)
-    #model.summary()
+    # model.summary()
 
     """if FLAGS.weights == None:
         print("Training from scratch")
@@ -172,7 +162,6 @@ def main(config_path):
             test_step(image_data, target)
         model.save_weights(config['weight_path'])
         print('model save %s' % config['weight_path'])
-
 
 
 if __name__ == '__main__':

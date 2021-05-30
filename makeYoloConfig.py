@@ -62,7 +62,7 @@ def load_JSON_file(anno_path: str, classes):
     """
 
     with open(anno_path, 'r') as f:
-        print('load %s...' % anno_path)
+        logging.info(f'loading annotation file {anno_path}')
         data = json.load(f)
         np.random.shuffle(data['images'])
         np.random.shuffle(data['annotations'])
@@ -122,23 +122,26 @@ def get_anchor_box(w_h, tiny):
     return arranged.reshape(-1).tolist()
 
 
-def cal_anchors(set_file_path):
+def cal_anchors(bbox_file_path, size):
     """
     calculate anchor box
-    @param set_file_path: dataset annotation file path
+    @param bbox_file_path: dataset annotation file path
     @return: [[anchor box with k=9], [anchor box with k=6]]
     """
-    set_file_path = Path(set_file_path)
+    bbox_file_path = Path(bbox_file_path)
 
-    if not set_file_path.is_file():
-        raise FileNotFoundError(f'file {set_file_path} is not exists')
-    f = set_file_path.open('r')
+    if not bbox_file_path.is_file():
+        raise FileNotFoundError(f'file {bbox_file_path} is not exists')
+    f = bbox_file_path.open('r')
 
     w_h = [
-        [int(bbox[2]) - int(bbox[0]), int(bbox[3]) - int(bbox[1])]
+        [
+            # bbox size / img size * train size
+            float(obj[0]) / float(obj[2]) * size,
+            float(obj[1]) / float(obj[3]) * size,
+        ]
         for line in f.readlines()
-        for obj in line.strip().split(' ', )[1:]
-        for bbox in [obj.split(',')]
+        for obj in [line.strip().split(',')]
     ]
     f.close()
     return [
@@ -180,6 +183,7 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
         for index, name in enumerate(classes)
     }
     done = 0
+    bbox_wh_img_size = []
 
     for img in images.values():
         file_path = Path(data_set_dir) / img['file_name']
@@ -195,19 +199,38 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
                 ymin = int(item['bbox'][1])
                 xmax = xmin + int(item['bbox'][2])
                 ymax = ymin + int(item['bbox'][3])
+                if train:
+                    bbox_wh_img_size.append(
+                        [str(item['bbox'][2]),
+                         str(item['bbox'][3]),
+                         str(img['width']),
+                         str(img['height'])]
+                    )
+
                 xmin, ymin, xmax, ymax = str(xmin), str(ymin), str(xmax), str(ymax)
+
                 label = str(classes[item['category_name']])
                 yolo_file.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
             yolo_file.write('\n')
             done += 1
     yolo_file.close()
+
     if train:
         class_file = Path('data') / 'classes' / (class_file_name + '.txt')
-        if class_file.exists():
+        if class_file.is_file():
             logging.warning(f'file {class_file} will be replace')
         with class_file.open('w') as f:
             f.write(json.dumps(classes))
-    logging.info(f'file {yolo_file_save_path} has {done} images')
+
+        wh_file = Path('data') / 'Sets' / 'bbox' / (class_file_name + '.txt')
+        if wh_file.is_file():
+            logging.warning(f'file {wh_file} will be replace')
+        with wh_file.open('w') as f:
+            for i in bbox_wh_img_size:
+                f.write(','.join(i) + '\n')
+
+    logging.info(f'file: {yolo_file_save_path} has {done} images')
+    # logging.info(f'bbox file: {w_h_file} writen. ')
 
 
 def Main(args):
@@ -226,6 +249,7 @@ def Main(args):
         'max_total_size': 50,
         'iou_threshold': 0.25,
         'score_threshold': 0.5,
+        'pretrain': None,
 
         # yolo option
         'YOLO': {
@@ -269,16 +293,18 @@ def Main(args):
     # path
     paths = configparser.ConfigParser()
     paths.read('sys.ini')
-    train_set_dir = paths['Paths']['train_set_dir']
-    train_anno_path = paths['Paths']['train_annotation_path']
-    val_set_dir = paths['Paths']['val_set_dir']
-    val_anno_path = paths['Paths']['val_annotation_path']
+    train_set_dir = paths['Annotations']['train_set_dir']
+    train_anno_path = paths['Annotations']['train_annotation_path']
+    val_set_dir = paths['Annotations']['val_set_dir']
+    val_anno_path = paths['Annotations']['val_annotation_path']
 
     model_path = Path(paths['Save_dir']['checkpoints']) / name
     weight_path = Path(paths['Save_dir']['weights']) / (name + '.h5')
     train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
     val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
     config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
+    bbox_file = Path(paths['Save_dir']['train_bbox_file']) / (name + '.txt')
+    pretrain_weight_path = None if not args.pretrain else Path(args.pretrain)
 
     train_epoch_size = args.train_size
     val_epoch_size = args.val_size
@@ -316,7 +342,9 @@ def Main(args):
         raise Exception('Cant handle this data set please check out the classes name file')
     with classes_file_path.open() as f:
         classes = json.load(f)
-    anchor = cal_anchors(str(train_yolo_format_save_path))
+
+
+    anchor = cal_anchors(str(bbox_file), size=args.size)
     classes = [_class for _class in classes.keys()]
 
     config['name'] = name
@@ -326,6 +354,7 @@ def Main(args):
     config['size'] = args.size
     config['model_type'] = args.model
     config['tiny'] = args.tiny
+    config['pretrain']: pretrain_weight_path
     config['YOLO']['CLASSES'] = classes
     config['YOLO']['ANCHORS'] = anchor[0]
     config['YOLO']['ANCHORS_V3'] = anchor[0]
@@ -352,6 +381,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
+    parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
     parser.add_argument('-ts', '--train_size', type=int, default=1500, help='Train epoch size')
     parser.add_argument('-vs', '--val_size', type=int, default=300, help='Val epoch size')
     args = parser.parse_args()
