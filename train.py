@@ -61,15 +61,6 @@ def main(config_path):
     model = tf.keras.Model(input_layer, bbox_tensors)
     model.summary()
 
-    """if FLAGS.weights == None:
-        print("Training from scratch")
-    else:
-        if FLAGS.weights.split(".")[len(FLAGS.weights.split(".")) - 1] == "weights":
-            utils.load_weights(model, FLAGS.weights, FLAGS.model, FLAGS.tiny)
-        else:
-            model.load_weights(FLAGS.weights)
-        print('Restoring weights from: %s ... ' % FLAGS.weights)"""
-
     if config['TRAIN']['PRETRAIN']:
         if config['TRAIN']['PRETRAIN'].endswith('weights'):
             utils.load_weights(model, config['TRAIN']['PRETRAIN'], config['model_type'], config['tiny'])
@@ -78,12 +69,6 @@ def main(config_path):
         print('Train from %s' % (config['TRAIN']['PRETRAIN']))
     else:
         print("Training from scratch")
-
-    """if config['TRAIN']['PRETRAIN'] == '':
-        print("Training from scratch")
-    else:
-        model.load_weights(config['pretrain_weights'])
-        print('Restoring weights from: %s ... ' % config['pretrain_weights'])"""
 
     optimizer = tf.keras.optimizers.Adam()
     if os.path.exists(logdir): shutil.rmtree(logdir)

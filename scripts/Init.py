@@ -1,7 +1,6 @@
 import configparser
 from pathlib import Path
 import os
-from scripts.utils import printdic
 
 config = configparser.ConfigParser()
 root = Path('../')

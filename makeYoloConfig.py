@@ -372,6 +372,9 @@ def Main(args):
     config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
 
+    if not config['pretrain']:
+        config['TRAIN']['FISRT_STAGE_EPOCHS'] = 0
+
     print('-------------------CONFIG-------------------')
     printdic(config)
     print('--------------------END---------------------')
