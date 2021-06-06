@@ -230,7 +230,6 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
                 f.write(','.join(i) + '\n')
 
     logging.info(f'file: {yolo_file_save_path} has {done} images')
-    # logging.info(f'bbox file: {w_h_file} writen. ')
 
 
 def Main(args):
@@ -359,9 +358,9 @@ def Main(args):
     config['YOLO']['ANCHORS'] = anchor[0]
     config['YOLO']['ANCHORS_V3'] = anchor[0]
     config['YOLO']['ANCHORS_TINY'] = anchor[1]
-    config['TRAIN']['ANNOT_PATH'] = str(train_anno_path)
+    config['TRAIN']['ANNOT_PATH'] = str(train_yolo_format_save_path)
     config['TRAIN']['INPUT_SIZE'] = args.size
-    config['TEST']['ANNOT_PATH'] = str(val_anno_path)
+    config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
 
     print('-------------------CONFIG-------------------')
