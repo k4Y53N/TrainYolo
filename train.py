@@ -70,14 +70,14 @@ def main(config_path):
             model.load_weights(FLAGS.weights)
         print('Restoring weights from: %s ... ' % FLAGS.weights)"""
 
-    if config['TRAIN']['PRETRAIN'] == '':
-        print("Training from scratch")
-    else:
+    if config['TRAIN']['PRETRAIN']:
         if config['TRAIN']['PRETRAIN'].endswith('weights'):
             utils.load_weights(model, config['TRAIN']['PRETRAIN'], config['model_type'], config['tiny'])
         else:
             model.load_weights(config['TRAIN']['PRETRAIN'])
         print('Train from %s' % (config['TRAIN']['PRETRAIN']))
+    else:
+        print("Training from scratch")
 
     """if config['TRAIN']['PRETRAIN'] == '':
         print("Training from scratch")
