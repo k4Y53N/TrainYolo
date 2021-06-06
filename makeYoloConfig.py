@@ -11,6 +11,16 @@ from scripts.utils import printdic
 logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
 
 
+def JSON_parser(cfg_path):
+    """
+    :param cfg_path: config file path
+    :return: config
+    """
+    with open(cfg_path, 'r') as f:
+        config = json.load(f)
+    return config
+
+
 def load_class(class_path):
     """
     :param class_path: classes file path
@@ -342,7 +352,6 @@ def Main(args):
     with classes_file_path.open() as f:
         classes = json.load(f)
 
-
     anchor = cal_anchors(str(bbox_file), size=args.size)
     classes = [_class for _class in classes.keys()]
 
@@ -381,7 +390,7 @@ if __name__ == '__main__':
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
     parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
-    parser.add_argument('-ts', '--train_size', type=int, default=1500, help='Train epoch size')
-    parser.add_argument('-vs', '--val_size', type=int, default=300, help='Val epoch size')
+    parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
+    parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
     args = parser.parse_args()
     Main(args)

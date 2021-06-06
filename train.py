@@ -6,7 +6,7 @@ from core.dataset import Dataset
 import numpy as np
 from core import utils
 from core.utils import freeze_all, unfreeze_all
-from makeConfig import JSON_parser
+from makeYoloConfig import JSON_parser
 import argparse
 
 
@@ -59,7 +59,7 @@ def main(config_path):
             bbox_tensors.append(bbox_tensor)
 
     model = tf.keras.Model(input_layer, bbox_tensors)
-    # model.summary()
+    model.summary()
 
     """if FLAGS.weights == None:
         print("Training from scratch")
@@ -73,8 +73,17 @@ def main(config_path):
     if config['TRAIN']['PRETRAIN'] == '':
         print("Training from scratch")
     else:
+        if config['TRAIN']['PRETRAIN'].endswith('weights'):
+            utils.load_weights(model, config['TRAIN']['PRETRAIN'], config['model_type'], config['tiny'])
+        else:
+            model.load_weights(config['TRAIN']['PRETRAIN'])
+        print('Train from %s' % (config['TRAIN']['PRETRAIN']))
+
+    """if config['TRAIN']['PRETRAIN'] == '':
+        print("Training from scratch")
+    else:
         model.load_weights(config['pretrain_weights'])
-        print('Restoring weights from: %s ... ' % config['pretrain_weights'])
+        print('Restoring weights from: %s ... ' % config['pretrain_weights'])"""
 
     optimizer = tf.keras.optimizers.Adam()
     if os.path.exists(logdir): shutil.rmtree(logdir)
