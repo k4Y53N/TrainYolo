@@ -370,6 +370,7 @@ def Main(args):
     config['TRAIN']['ANNOT_PATH'] = str(train_yolo_format_save_path)
     config['TRAIN']['INPUT_SIZE'] = args.size
     config['TRAIN']['BATCH_SIZE'] = args.batch_size
+    config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch
     config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
     config['TEST']['BATCH_SIZE'] = args.batch_size
@@ -387,7 +388,7 @@ def Main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Make yolo config and preprocess dataset')
     parser.add_argument('-n', '--name', required=False, type=str, help='Model name')
-    parser.add_argument('-c', '--classes', required=True, type=str, help='classes name file path')
+    parser.add_argument('-c', '--classes', required=True, type=str, help='Classes name file path')
     parser.add_argument('-s', '--size', type=int, default=416,
                         choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
                         help='Image input size')
@@ -396,7 +397,8 @@ if __name__ == '__main__':
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
     parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
-    parser.add_argument('-bs', '--batch_size', type=int, default=4, help='batch size')
+    parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
+    parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
     parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
     parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
     args = parser.parse_args()
