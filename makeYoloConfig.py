@@ -76,6 +76,7 @@ def load_JSON_file(anno_path: str, classes):
     with open(anno_path, 'r') as f:
         logging.info(f'loading annotation file {anno_path}')
         data = json.load(f)
+        logging.info(f'load annotation file {anno_path} finished')
         np.random.shuffle(data['images'])
         np.random.shuffle(data['annotations'])
 
