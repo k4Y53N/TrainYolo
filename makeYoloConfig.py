@@ -1,12 +1,14 @@
 import json
 import argparse
 import numpy as np
+import struct
 import threading
 import configparser
 import logging
 from sklearn.cluster import KMeans
 from pathlib import Path
 from scripts.utils import printdic
+from multiprocessing import Process
 
 logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
 
@@ -84,7 +86,7 @@ def load_JSON_file(anno_path: str, classes):
     if len(cats) <= 0:
         raise Exception('Cant fine any classes in annotation file')
 
-    annos = [anno for anno in data['annotations'] if anno['category_id'] in cats.keys()]
+    annos = (anno for anno in data['annotations'] if anno['category_id'] in cats.keys())
 
     imgs = {
         img['id']: {
@@ -142,18 +144,30 @@ def cal_anchors(bbox_file_path, size):
 
     if not bbox_file_path.is_file():
         raise FileNotFoundError(f'file {bbox_file_path} is not exists')
-    f = bbox_file_path.open('r')
+    file = bbox_file_path.open('rb')
+    chunk_size = struct.calcsize('4f')
 
-    w_h = [
-        [
-            # bbox size / img size * train size
-            float(obj[0]) / float(obj[2]) * size,
-            float(obj[1]) / float(obj[3]) * size,
-        ]
-        for line in f.readlines()
-        for obj in [line.strip().split(',')]
-    ]
-    f.close()
+    def read_bbox(f):
+        while True:
+            byt = f.read(chunk_size)
+            if not byt:
+                break
+            bbox = struct.unpack('>4f', byt)
+            yield [
+                bbox[0] / bbox[2] * size,
+                bbox[1] / bbox[3] * size
+            ]
+    w_h = [box for box in read_bbox(file)]
+    # w_h = [
+    #     [
+    #         # bbox size / img size * train size
+    #         float(obj[0]) / float(obj[2]) * size,
+    #         float(obj[1]) / float(obj[3]) * size,
+    #     ]
+    #     for line in f.readlines()
+    #     for obj in [line.strip().split(',')]
+    # ]
+    file.close()
     return [
         get_anchor_box(w_h, tiny=False),
         get_anchor_box(w_h, tiny=True)
@@ -197,32 +211,35 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
 
     for img in images.values():
         file_path = Path(data_set_dir) / img['file_name']
+
         if done >= set_size:
             break
         if not file_path.exists():
             continue
-        if len(img['items']) > 0:
-            yolo_file.write(str(file_path))
-            yolo_file.write(' ')
-            for item in img['items']:
-                xmin = int(item['bbox'][0])
-                ymin = int(item['bbox'][1])
-                xmax = xmin + int(item['bbox'][2])
-                ymax = ymin + int(item['bbox'][3])
-                if train:
-                    bbox_wh_img_size.append(
-                        [str(item['bbox'][2]),
-                         str(item['bbox'][3]),
-                         str(img['width']),
-                         str(img['height'])]
-                    )
+        if len(img['items']) < 0:
+            continue
 
-                xmin, ymin, xmax, ymax = str(xmin), str(ymin), str(xmax), str(ymax)
+        yolo_file.write(str(file_path))
+        yolo_file.write(' ')
+        for item in img['items']:
+            xmin = int(item['bbox'][0])
+            ymin = int(item['bbox'][1])
+            xmax = xmin + int(item['bbox'][2])
+            ymax = ymin + int(item['bbox'][3])
+            if train:
+                bbox_wh_img_size.append(
+                    [item['bbox'][2],
+                     item['bbox'][3],
+                     img['width'],
+                     img['height']]
+                )
 
-                label = str(classes[item['category_name']])
-                yolo_file.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
-            yolo_file.write('\n')
-            done += 1
+            xmin, ymin, xmax, ymax = str(xmin), str(ymin), str(xmax), str(ymax)
+
+            label = str(classes[item['category_name']])
+            yolo_file.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
+        yolo_file.write('\n')
+        done += 1
     yolo_file.close()
 
     if train:
@@ -232,12 +249,14 @@ def write_coco2yolo_file(anno_file_path, classes, data_set_dir, yolo_file_save_p
         with class_file.open('w') as f:
             f.write(json.dumps(classes))
 
-        wh_file = Path('data') / 'Sets' / 'bbox' / (class_file_name + '.txt')
+        wh_file = Path('data') / 'Sets' / 'bbox' / (class_file_name + '.bbox')
         if wh_file.is_file():
             logging.warning(f'file {wh_file} will be replace')
-        with wh_file.open('w') as f:
+        with wh_file.open('wb') as f:
             for i in bbox_wh_img_size:
-                f.write(','.join(i) + '\n')
+                byt = struct.pack('>4f', i[0], i[1], i[2], i[3])
+                f.write(byt)
+                # f.write(','.join(i) + '\n')
 
     logging.info(f'file: {yolo_file_save_path} has {done} images')
 
@@ -312,14 +331,14 @@ def Main(args):
     train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
     val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
     config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
-    bbox_file = Path(paths['Save_dir']['train_bbox_file']) / (name + '.txt')
+    bbox_file = Path(paths['Save_dir']['train_bbox_file']) / (name + '.bbox')
     pretrain_weight_path = None if not args.pretrain else Path(args.pretrain)
 
     train_epoch_size = args.train_size
     val_epoch_size = args.val_size
     classes = load_class(args.classes)
 
-    t1 = threading.Thread(
+    t1 = Process(
         target=write_coco2yolo_file,
         args=(
             str(train_anno_path),
@@ -332,7 +351,7 @@ def Main(args):
         ), daemon=True
     )
 
-    t2 = threading.Thread(
+    t2 = Process(
         target=write_coco2yolo_file,
         args=(
             str(val_anno_path),
@@ -374,7 +393,6 @@ def Main(args):
     config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
     config['TEST']['BATCH_SIZE'] = args.batch_size
-
 
     if not config['pretrain']:
         config['TRAIN']['FISRT_STAGE_EPOCHS'] = 0
