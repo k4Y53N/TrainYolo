@@ -125,7 +125,7 @@ def cal_kMeans(w_h, tiny):
 
     dot = [box[0] * box[1] for box in cluster]
     args = np.argsort(dot)
-    arranged = np.zeros_like(cluster, dtype=np.int)
+    arranged = np.zeros_like(cluster, int)
 
     for i, arg in enumerate(args):
         arranged[i] = cluster[arg]
