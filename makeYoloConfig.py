@@ -46,8 +46,7 @@ def write_config(config: dict, dst):
     if config_save_path.exists():
         logging.warning(f'file : {config_save_path} is exist and will be replace.')
     with config_save_path.open('w') as f:
-        json_object = json.dumps(config)
-        f.write(json_object)
+        json_object = json.dump(config, fp=f)
     logging.info(f'Config save at {config_save_path}')
 
 
@@ -229,7 +228,7 @@ def write_coco2yolo_file(
         if class_file.is_file():
             logging.warning(f'file {class_file} will be replace')
         with class_file.open('w') as f:
-            f.write(json.dumps(classes))
+            json.dump(classes, fp=f)
 
     logging.info(f'file: {yolo_file_save_path} has {done} images')
     return bbox_wh_img_size
@@ -251,7 +250,6 @@ def Main(args):
         'max_total_size': 50,
         'iou_threshold': 0.25,
         'score_threshold': 0.5,
-        'pretrain': None,
 
         # yolo option
         'YOLO': {
@@ -304,7 +302,7 @@ def Main(args):
     weight_path = Path(paths['Save_dir']['weights']) / (name + '.h5')
     train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
     val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
-    config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.cfg')
+    config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.json')
     pretrain_weight_path = None if not args.pretrain else Path(args.pretrain)
 
     train_epoch_size = args.train_size
@@ -348,7 +346,6 @@ def Main(args):
     config['size'] = args.size
     config['model_type'] = args.model
     config['tiny'] = args.tiny
-    config['pretrain']: pretrain_weight_path
     config['YOLO']['CLASSES'] = classes
     config['YOLO']['ANCHORS'] = anchor[0]
     config['YOLO']['ANCHORS_V3'] = anchor[0]
@@ -357,11 +354,12 @@ def Main(args):
     config['TRAIN']['INPUT_SIZE'] = args.size
     config['TRAIN']['BATCH_SIZE'] = args.batch_size
     config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch
+    config['TRAIN']['PRETRAIN']: pretrain_weight_path
     config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
     config['TEST']['BATCH_SIZE'] = args.batch_size
 
-    if not config['pretrain']:
+    if not config['TRAIN']['PRETRAIN']:
         config['TRAIN']['FISRT_STAGE_EPOCHS'] = 0
 
     print('-------------------CONFIG-------------------')

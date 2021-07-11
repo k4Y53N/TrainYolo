@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tensorflow as tf
@@ -15,31 +16,30 @@ def main(config_path):
 
     trainset = Dataset(config, is_training=True)
     testset = Dataset(config, is_training=False)
-    logdir = "./data/log"
+    logdir = os.path.join('data', 'log', config['name'])
     isfreeze = False
     steps_per_epoch = len(trainset)
     first_stage_epochs = config['TRAIN']['FISRT_STAGE_EPOCHS']
     second_stage_epochs = config['TRAIN']['SECOND_STAGE_EPOCHS']
+    IOU_LOSS_THRESH = config['YOLO']['IOU_LOSS_THRESH']
+    LR_INIT, LR_END = config['TRAIN']['LR_INIT'], config['TRAIN']['LR_END']
+    INPUT_SIZE = config['TRAIN']['INPUT_SIZE']
     global_steps = tf.Variable(1, trainable=False, dtype=tf.int64)
     warmup_steps = config['TRAIN']['WARMUP_EPOCHS'] * steps_per_epoch
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
-    # train_steps = (first_stage_epochs + second_stage_epochs) * steps_per_period
-
-    input_layer = tf.keras.layers.Input([config['TRAIN']['INPUT_SIZE'], config['TRAIN']['INPUT_SIZE'], 3])
+    input_layer = tf.keras.layers.Input([INPUT_SIZE, INPUT_SIZE, 3])
     STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(config)
-    IOU_LOSS_THRESH = config['YOLO']['IOU_LOSS_THRESH']
-
     freeze_layers = utils.load_freeze_layer(config['model_type'], config['tiny'])
-
     feature_maps = YOLO(input_layer, NUM_CLASS, config['model_type'], config['tiny'])
+
     if config['tiny']:
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, config['TRAIN']['INPUT_SIZE'] // 16, NUM_CLASS, STRIDES, ANCHORS, i,
+                bbox_tensor = decode_train(fm, INPUT_SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i,
                                            XYSCALE)
             else:
-                bbox_tensor = decode_train(fm, config['TRAIN']['INPUT_SIZE'] // 32, NUM_CLASS, STRIDES, ANCHORS, i,
+                bbox_tensor = decode_train(fm, INPUT_SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i,
                                            XYSCALE)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
@@ -47,13 +47,13 @@ def main(config_path):
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, config['TRAIN']['INPUT_SIZE'] // 8, NUM_CLASS, STRIDES, ANCHORS, i,
+                bbox_tensor = decode_train(fm, INPUT_SIZE // 8, NUM_CLASS, STRIDES, ANCHORS, i,
                                            XYSCALE)
             elif i == 1:
-                bbox_tensor = decode_train(fm, config['TRAIN']['INPUT_SIZE'] // 16, NUM_CLASS, STRIDES, ANCHORS, i,
+                bbox_tensor = decode_train(fm, INPUT_SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i,
                                            XYSCALE)
             else:
-                bbox_tensor = decode_train(fm, config['TRAIN']['INPUT_SIZE'] // 32, NUM_CLASS, STRIDES, ANCHORS, i,
+                bbox_tensor = decode_train(fm, INPUT_SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i,
                                            XYSCALE)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
@@ -71,7 +71,11 @@ def main(config_path):
         print("Training from scratch")
 
     optimizer = tf.keras.optimizers.Adam()
-    if os.path.exists(logdir): shutil.rmtree(logdir)
+    if os.path.exists(logdir):
+        shutil.rmtree(logdir)
+        os.makedirs(logdir)
+    else:
+        os.makedirs(logdir)
     writer = tf.summary.create_file_writer(logdir)
 
     # define training step function
@@ -101,11 +105,12 @@ def main(config_path):
             # update learning rate
             global_steps.assign_add(1)
             if global_steps < warmup_steps:
-                lr = global_steps / warmup_steps * config['TRAIN']['LR_INIT']
+                lr = global_steps / warmup_steps * LR_INIT
             else:
-                lr = config['TRAIN']['LR_END'] + 0.5 * (config['TRAIN']['LR_INIT'] - config['TRAIN']['LR_END']) * (
+                lr = LR_END + 0.5 * (LR_INIT - LR_END) * (
                     (1 + tf.cos((global_steps - warmup_steps) / (total_steps - warmup_steps) * np.pi))
                 )
+                config['TRAIN']['LR_INIT'] = float(lr)
             optimizer.lr.assign(lr.numpy())
 
             # writing summary data
@@ -155,11 +160,14 @@ def main(config_path):
         for image_data, target in testset:
             test_step(image_data, target)
         model.save_weights(config['weight_path'])
+        with open(config_path, 'w') as f:
+            json.dump(config, fp=f)
+
         print('model save %s' % config['weight_path'])
 
 
 if __name__ == '__main__':
     paser = argparse.ArgumentParser(description='Train model using config file')
-    paser.add_argument('-config', type=str, help='config file path')
+    paser.add_argument('--config', type=str, help='config file path')
     args = paser.parse_args()
     main(args.config)
