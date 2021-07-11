@@ -12,6 +12,10 @@ import argparse
 
 
 def main(config_path):
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if len(physical_devices) > 0:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
     config = JSON_parser(config_path)
 
     trainset = Dataset(config, is_training=True)
@@ -70,8 +74,6 @@ def main(config_path):
     else:
         print("Training from scratch")
 
-
-
     optimizer = tf.keras.optimizers.Adam()
     if os.path.exists(logdir):
         shutil.rmtree(logdir)
@@ -126,7 +128,7 @@ def main(config_path):
 
     def test_step(image_data, target):
         with tf.GradientTape() as tape:
-            pred_result = model(image_data, training=True)
+            pred_result = model(image_data, training=False)
             giou_loss = conf_loss = prob_loss = 0
 
             # optimizing process
