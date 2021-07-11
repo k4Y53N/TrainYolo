@@ -70,6 +70,8 @@ def main(config_path):
     else:
         print("Training from scratch")
 
+
+
     optimizer = tf.keras.optimizers.Adam()
     if os.path.exists(logdir):
         shutil.rmtree(logdir)
@@ -160,6 +162,7 @@ def main(config_path):
         for image_data, target in testset:
             test_step(image_data, target)
         model.save_weights(config['weight_path'])
+        config['TRAIN']['PRETRAIN'] = config['weight_path']
         with open(config_path, 'w') as f:
             json.dump(config, fp=f)
 
