@@ -46,7 +46,7 @@ def write_config(config: dict, dst):
     if config_save_path.exists():
         logging.warning(f'file : {config_save_path} is exist and will be replace.')
     with config_save_path.open('w') as f:
-        json_object = json.dump(config, fp=f)
+        json.dump(config, fp=f)
     logging.info(f'Config save at {config_save_path}')
 
 
@@ -177,7 +177,7 @@ def write_coco2yolo_file(
 
     if not anno_file_path.is_file():
         logging.error(f'{anno_file_path} does not exists')
-        raise FileNotFoundError
+        raise FileNotFoundError(f'{anno_file_path}')
     if not data_set_dir.is_dir():
         logging.error(f'dir: {data_set_dir} not effective')
         raise NotADirectoryError(f'{data_set_dir}')
@@ -198,7 +198,7 @@ def write_coco2yolo_file(
 
         if done >= set_size:
             break
-        if not file_path.exists() or len(img['items']) < 0:
+        if not file_path.exists() or len(img['items']) < 1:
             continue
 
         yolo_file.write(str(file_path))
