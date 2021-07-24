@@ -88,6 +88,7 @@ def read_class_names(classes):
 
     return names
 
+
 def load_config(config):
     if config['tiny']:
         STRIDES = np.array(config['YOLO']['STRIDES_TINY'])

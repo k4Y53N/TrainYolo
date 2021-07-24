@@ -303,7 +303,10 @@ def Main(args):
     train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
     val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
     config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.json')
-    pretrain_weight_path = None if not args.pretrain else Path(args.pretrain)
+    pretrain_weight_path = Path(args.pretrain)
+
+    if not pretrain_weight_path.is_file():
+        pretrain_weight_path = None
 
     train_epoch_size = args.train_size
     val_epoch_size = args.val_size
@@ -354,13 +357,15 @@ def Main(args):
     config['TRAIN']['INPUT_SIZE'] = args.size
     config['TRAIN']['BATCH_SIZE'] = args.batch_size
     config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch
-    config['TRAIN']['PRETRAIN']: pretrain_weight_path
+    config['TRAIN']['PRETRAIN'] = str(pretrain_weight_path)
     config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
     config['TEST']['INPUT_SIZE'] = args.size
     config['TEST']['BATCH_SIZE'] = args.batch_size
 
     if not config['TRAIN']['PRETRAIN']:
-        config['TRAIN']['FISRT_STAGE_EPOCHS'] = 0
+        config['TRAIN']['FISRT_STAGE_EPOCHS'] = 20
+    else:
+        config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch - 20
 
     print('-------------------CONFIG-------------------')
     printdic(config)
@@ -379,7 +384,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
+    parser.add_argument('-p', '--pretrain', type=str, default='yolov4.weights', help='Pretrain weight path')
     parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
     parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
     parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
