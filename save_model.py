@@ -87,7 +87,7 @@ def save_tf(config):
 
     model = tf.keras.Model(input_layer, pred)
     model.load_weights(config['weight_path'])
-    tf.saved_model.save(model, config['model_path'])
+    model.save(config['model_path'])
 
 
 def main(config):
@@ -104,7 +104,7 @@ def main(config):
 
     model = build_model(config)
     model.load_weights(weight_path)
-    tf.saved_model.save(model, model_path)
+    model.save(model_path)
 
 
 if __name__ == '__main__':
