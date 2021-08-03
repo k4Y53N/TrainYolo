@@ -384,7 +384,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('-p', '--pretrain', type=str, default='yolov4.weights', help='Pretrain weight path')
+    parser.add_argument('-p', '--pretrain', type=str, help='Pretrain weight path')
     parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
     parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
     parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
