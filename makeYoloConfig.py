@@ -8,7 +8,11 @@ from pathlib import Path
 from scripts.utils import printdic
 from multiprocessing import Pool, cpu_count
 
-logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s %(levelname)s:%(message)s',
+    datefmt='%Y/%m/%d %H:%M:%S',
+    level=logging.INFO
+)
 
 
 def JSON_parser(cfg_path):
@@ -309,7 +313,7 @@ def Main(args):
         pretrain_weight_path = None
 
     train_epoch_size = args.train_size
-    val_epoch_size = args.val_size
+    val_epoch_size = args.test_size
     classes = load_class(args.classes)
 
     p1 = (
@@ -347,7 +351,7 @@ def Main(args):
     config['weight_path'] = str(weight_path)
     config['frame_work'] = args.frame_work
     config['size'] = args.size
-    config['model_type'] = args.model
+    config['model_type'] = args.model_type
     config['tiny'] = args.tiny
     config['YOLO']['CLASSES'] = classes
     config['YOLO']['ANCHORS'] = anchor[0]
