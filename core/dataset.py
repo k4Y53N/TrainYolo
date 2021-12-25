@@ -8,18 +8,14 @@ import numpy as np
 import tensorflow as tf
 import core.utils as utils
 
+
 class Dataset(object):
     """implement Dataset here"""
 
     def __init__(self, config, is_training: bool, dataset_type: str = "converted_coco"):
         self.tiny = config['tiny']
-
         self.strides, self.anchors, NUM_CLASS, XYSCALE = utils.load_config(config)
-
-        self.config = config
-
         self.dataset_type = dataset_type
-
         self.annot_path = (
             config['TRAIN']['ANNOT_PATH'] if is_training else config['TEST']['ANNOT_PATH']
         )
@@ -30,13 +26,11 @@ class Dataset(object):
             config['TRAIN']['BATCH_SIZE'] if is_training else config['TEST']['BATCH_SIZE']
         )
         self.data_aug = config['TRAIN']['DATA_AUG'] if is_training else config['TEST']['DATA_AUG']
-
-        self.train_input_sizes = config['TRAIN']['INPUT_SIZE']
+        self.train_input_size = config['TRAIN']['INPUT_SIZE']
         self.classes = utils.read_class_names(config['YOLO']['CLASSES'])
         self.num_classes = len(self.classes)
         self.anchor_per_scale = config['YOLO']['ANCHOR_PER_SCALE']
         self.max_bbox_per_scale = 150
-
         self.annotations = self.load_annotations()
         self.num_samples = len(self.annotations)
         self.num_batchs = int(np.ceil(self.num_samples / self.batch_size))
@@ -84,8 +78,6 @@ class Dataset(object):
 
     def __next__(self):
         with tf.device("/cpu:0"):
-            # self.train_input_size = random.choice(self.train_input_sizes)
-            self.train_input_size = self.config['TRAIN']['INPUT_SIZE']
             self.train_output_sizes = self.train_input_size // self.strides
 
             batch_image = np.zeros(
