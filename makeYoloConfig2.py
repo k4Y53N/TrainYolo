@@ -28,7 +28,7 @@ class MakeYoloConfig:
             self,
             config_file_name: str,
             classes_file_path: str,
-            sys_config_path: str = './sys.conf ',
+            sys_config_path: str = './sys.ini',
             pretrain_file_path: str = '',
             model_type: str = 'yolov4',
             frame_work: str = 'tf',
@@ -79,11 +79,11 @@ class MakeYoloConfig:
         self.check_all_paths()
         self.load_classes()
         train = Thread(
-            target=self.call_write,
+            target=self.write,
             args=(self.train_annotation_file, self.train_bbox_file, True)
         )
         test = Thread(
-            target=self.call_write,
+            target=self.write,
             args=(self.test_annotation_file, self.test_bbox_file, False)
         )
         train.start()
@@ -104,7 +104,7 @@ class MakeYoloConfig:
 
     def check_all_paths(self):
         if self.sys_config_file.is_file():
-            log.info(f'System config file path: {self.sys_config_file.name}')
+            log.info(f'System config file path: {self.sys_config_file.absolute()}')
             self.sys_config.read(self.sys_config_file.name)
         else:
             raise FileNotFoundError(self.sys_config_file.name)
@@ -142,30 +142,30 @@ class MakeYoloConfig:
         )
 
         for ex_dir in checking_exist_dir_group:
-            if not (ex_dir.is_dir() and ex_dir.exists()):
+            if not ex_dir.is_dir():
                 raise NotADirectoryError(ex_dir.absolute())
 
         for ex_file in checking_exist_file_group:
-            if not (ex_file.is_file() and ex_file.exists()):
+            if not ex_file.is_file():
                 raise FileNotFoundError(ex_file.absolute())
 
         for mk_dir in make_dirs:
-            if not (mk_dir.is_dir() and mk_dir.exists()):
-                os.makedirs(mk_dir.name, exist_ok=True)
+            if not mk_dir.is_dir():
+                os.makedirs(mk_dir.absolute(), exist_ok=True)
 
         if self.pretrain_file:
-            if not (self.pretrain_file.is_file() and self.pretrain_file.is_file()):
+            if not self.pretrain_file.is_file():
                 raise FileNotFoundError(self.pretrain_file.absolute())
 
     def load_classes(self):
         with self.classes_file.open('r') as f:
             self.classes = [line.strip() for line in f.readlines()]
 
-    def call_write(self, annotation_file: Path, bbox_file: Path, training: bool):
+    def write(self, annotation_file: Path, bbox_file: Path, training: bool):
         try:
             self.write_coco2yolo(annotation_file, bbox_file, training)
         except Exception as e:
-            log.error(f'{e.__class__.__name__}({e.args[0]})')
+            log.error(f'{e.__class__.__name__}({e.args})', exc_info=True)
             if training:
                 self.train_bbox_file.unlink(missing_ok=True)
             else:
@@ -178,7 +178,7 @@ class MakeYoloConfig:
             for index, class_name in enumerate(classes)
         }
         done = 0
-        bbox_wh_img_size = []
+        anchor_boxes = []
 
         if training:
             data_save_dir = self.train_set_dir
@@ -203,7 +203,7 @@ class MakeYoloConfig:
                     y_min = int(item['bbox'][1])
                     x_max = x_min + int(item['bbox'][2])
                     y_max = y_min + int(item['bbox'][3])
-                    bbox_wh_img_size.append(
+                    anchor_boxes.append(
                         (item['bbox'][2],
                          item['bbox'][3],
                          image['width'],
@@ -222,24 +222,24 @@ class MakeYoloConfig:
         log.info(f'{bbox_file.name} have {done} images')
 
         if training:
-            self.calculate_anchor_box(bbox_wh_img_size)
+            self.calculate_anchor_box(anchor_boxes)
             self.classes = list(classes.keys())
 
     def load_annotation_file(self, file: Path):
         if file.suffix == '.pickle':
             with file.open('rb') as f:
-                log.info(f'Start loading annotation file: {file.name}')
+                log.info(f'Start loading annotation file: {file.absolute()}')
                 data = pickle.load(f)
                 np.random.shuffle(data['images'])
                 np.random.shuffle(data['annotations'])
-                log.info(f'loading annotation file: {file.name} finish')
+                log.info(f'loading annotation file: {file.absolute()} finish')
         elif file.suffix == '.json':
             with file.open('r') as f:
-                log.info(f'Start loading annotation file: {file.name}')
+                log.info(f'Start loading annotation file: {file.absolute()}')
                 data = json.load(f)
                 np.random.shuffle(data['images'])
                 np.random.shuffle(data['annotations'])
-                log.info(f'loading annotation file: {file.name} finish')
+                log.info(f'loading annotation file: {file.absolute()} finish')
         else:
             raise RuntimeError('Unknown file suffix')
 
@@ -304,14 +304,14 @@ class MakeYoloConfig:
         x = np.array(w_h)
         kmeans = KMeans(n_clusters=k).fit(x)
         cluster = kmeans.cluster_centers_
-        dot = [box[0] * box[1] for box in cluster]
-        sort_args = np.argsort(dot)
-        arranged = np.zeros_like(cluster, int)
+        boxes_size = [box[0] * box[1] for box in cluster]
+        sort_args = np.argsort(boxes_size)
+        arranged_cluster = np.zeros_like(cluster, int)
 
         for i, arg in enumerate(sort_args):
-            arranged[i] = cluster[arg]
+            arranged_cluster[i] = cluster[arg]
 
-        return arranged.reshape(-1).tolist()
+        return arranged_cluster.reshape(-1).tolist()
 
     def write_yolo_config(self):
         self.yolo_config = {
@@ -366,7 +366,7 @@ class MakeYoloConfig:
         with self.yolo_config_file.open('w') as f:
             json.dump(self.yolo_config, f)
 
-        log.info(f'Write YOLO Config to {self.yolo_config_file}')
+        log.info(f'Write YOLO Config to {self.yolo_config_file.absolute()}')
 
 
 def main(args):
@@ -374,6 +374,7 @@ def main(args):
         myc = MakeYoloConfig(
             args.name,
             args.classes,
+            sys_config_path='./sys.ini',
             size=args.size,
             model_type=args.model,
             frame_work=args.frame_work,
@@ -386,7 +387,7 @@ def main(args):
         )
         myc.make()
     except Exception as E:
-        log.error(f'{E.__class__.__name__}({E.args[0]})')
+        log.error(f'{E.__class__.__name__}({E.args})', exc_info=True)
 
 
 if __name__ == '__main__':
