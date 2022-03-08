@@ -1,6 +1,6 @@
 import tensorflow as tf
 from core.yolov4 import YOLO, decode, filter_boxes
-import core.utils as utils
+from core.utils import load_config
 import argparse
 import os
 import json
@@ -8,38 +8,41 @@ import shutil
 
 
 def build_model(config):
-    SIZE = config['size']
-    FRAME_WORK = config['frame_work']
-    STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(config)
-    input_layer = tf.keras.layers.Input([SIZE, SIZE, 3])
-    feature_maps = YOLO(input_layer, NUM_CLASS, config['model_type'], config['tiny'])
+    strides, anchors, num_class, xyscale = load_config(config)
+    size = config['size']
+    frame_work = config['frame_work']
+    model_type = config['model_type']
+    tiny = config['tiny']
+    score_threshold = config['score_threshold']
+    input_layer = tf.keras.layers.Input([size, size, 3])
+    feature_maps = YOLO(input_layer, num_class, model_type, tiny)
     bbox_tensors = []
     prob_tensors = []
-    if config['tiny']:
+    if tiny:
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                output_tensors = decode(fm, SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE, FRAME_WORK)
+                output_tensors = decode(fm, size // 16, num_class, strides, anchors, i, xyscale, frame_work)
             else:
-                output_tensors = decode(fm, SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE, FRAME_WORK)
+                output_tensors = decode(fm, size // 32, num_class, strides, anchors, i, xyscale, frame_work)
             bbox_tensors.append(output_tensors[0])
             prob_tensors.append(output_tensors[1])
     else:
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                output_tensors = decode(fm, SIZE // 8, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE, FRAME_WORK)
+                output_tensors = decode(fm, size // 8, num_class, strides, anchors, i, xyscale, frame_work)
             elif i == 1:
-                output_tensors = decode(fm, SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE, FRAME_WORK)
+                output_tensors = decode(fm, size // 16, num_class, strides, anchors, i, xyscale, frame_work)
             else:
-                output_tensors = decode(fm, SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE, FRAME_WORK)
+                output_tensors = decode(fm, size // 32, num_class, strides, anchors, i, xyscale, frame_work)
             bbox_tensors.append(output_tensors[0])
             prob_tensors.append(output_tensors[1])
     pred_bbox = tf.concat(bbox_tensors, axis=1)
     pred_prob = tf.concat(prob_tensors, axis=1)
-    if FRAME_WORK == 'tflite':
+    if frame_work == 'tflite':
         pred = (pred_bbox, pred_prob)
     else:
-        boxes, pred_conf = filter_boxes(pred_bbox, pred_prob, score_threshold=config['score_threshold'],
-                                        input_shape=tf.constant([SIZE, SIZE]))
+        boxes, pred_conf = filter_boxes(pred_bbox, pred_prob, score_threshold=score_threshold,
+                                        input_shape=tf.constant([size, size]))
         pred = tf.concat([boxes, pred_conf], axis=-1)
 
     model = tf.keras.Model(input_layer, pred)
@@ -47,47 +50,54 @@ def build_model(config):
 
 
 def save_tf(config):
-    STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(config)
+    size = config['size']
+    frame_work = config['frame_work']
+    strides, anchors, num_class, xyscale = load_config(config)
+    model_type = config['model_type']
+    tiny = config['tiny']
+    score_threshold = config['score_threshold']
+    weight_path = config['weight_path']
+    model_path = config['model_path']
 
-    input_layer = tf.keras.layers.Input([config['size'], config['size'], 3])
-    feature_maps = YOLO(input_layer, NUM_CLASS, config['model_type'], config['tiny'])
+    input_layer = tf.keras.layers.Input([size, size, 3])
+    feature_maps = YOLO(input_layer, num_class, model_type, tiny)
     bbox_tensors = []
     prob_tensors = []
-    if config['tiny']:
+    if tiny:
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                output_tensors = decode(fm, config['size'] // 16, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE,
-                                        config['frame_work'])
+                output_tensors = decode(fm, size // 16, num_class, strides, anchors, i, xyscale,
+                                        frame_work)
             else:
-                output_tensors = decode(fm, config['size'] // 32, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE,
-                                        config['frame_work'])
+                output_tensors = decode(fm, size // 32, num_class, strides, anchors, i, xyscale,
+                                        frame_work)
             bbox_tensors.append(output_tensors[0])
             prob_tensors.append(output_tensors[1])
     else:
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                output_tensors = decode(fm, config['size'] // 8, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE,
-                                        config['frame_work'])
+                output_tensors = decode(fm, size // 8, num_class, strides, anchors, i, xyscale,
+                                        frame_work)
             elif i == 1:
-                output_tensors = decode(fm, config['size'] // 16, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE,
-                                        config['frame_work'])
+                output_tensors = decode(fm, size // 16, num_class, strides, anchors, i, xyscale,
+                                        frame_work)
             else:
-                output_tensors = decode(fm, config['size'] // 32, NUM_CLASS, STRIDES, ANCHORS, i, XYSCALE,
-                                        config['frame_work'])
+                output_tensors = decode(fm, size // 32, num_class, strides, anchors, i, xyscale,
+                                        frame_work)
             bbox_tensors.append(output_tensors[0])
             prob_tensors.append(output_tensors[1])
     pred_bbox = tf.concat(bbox_tensors, axis=1)
     pred_prob = tf.concat(prob_tensors, axis=1)
-    if config['frame_work'] == 'tflite':
+    if frame_work == 'tflite':
         pred = (pred_bbox, pred_prob)
     else:
-        boxes, pred_conf = filter_boxes(pred_bbox, pred_prob, score_threshold=config['score_threshold'],
-                                        input_shape=tf.constant([config['size'], config['size']]))
+        boxes, pred_conf = filter_boxes(pred_bbox, pred_prob, score_threshold=score_threshold,
+                                        input_shape=tf.constant([size, size]))
         pred = tf.concat([boxes, pred_conf], axis=-1)
 
     model = tf.keras.Model(input_layer, pred)
-    model.load_weights(config['weight_path'])
-    model.save(config['model_path'])
+    model.load_weights(weight_path)
+    model.save(model_path)
 
 
 def main(config):
