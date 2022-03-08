@@ -1,14 +1,20 @@
-import json
 import os
 import shutil
 import tensorflow as tf
-from core.yolov4 import YOLO, compute_loss, decode_train
-from core.dataset import Dataset
 import numpy as np
-from core import utils
-from core.utils import freeze_all, unfreeze_all
-from makeYoloConfig import JSON_parser
 import argparse
+import json
+from core.yolov4 import YOLO, compute_loss, decode_train
+from core.utils import freeze_all, unfreeze_all
+from core.dataset import Dataset
+from core import utils
+
+
+def load_json(config_path) -> dict:
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    return config
 
 
 def main(config_path):
@@ -16,7 +22,7 @@ def main(config_path):
     # if len(physical_devices) > 0:
     #     tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-    config = JSON_parser(config_path)
+    config = load_json(config_path)
 
     trainset = Dataset(config, is_training=True)
     testset = Dataset(config, is_training=False)
@@ -25,52 +31,54 @@ def main(config_path):
     steps_per_epoch = len(trainset)
     first_stage_epochs = config['TRAIN']['FISRT_STAGE_EPOCHS']
     second_stage_epochs = config['TRAIN']['SECOND_STAGE_EPOCHS']
-    IOU_LOSS_THRESH = config['YOLO']['IOU_LOSS_THRESH']
-    LR_INIT, LR_END = config['TRAIN']['LR_INIT'], config['TRAIN']['LR_END']
-    INPUT_SIZE = config['TRAIN']['INPUT_SIZE']
+    iou_loss_thresh = config['YOLO']['IOU_LOSS_THRESH']
+    lr_init, lr_end = config['TRAIN']['lr_init'], config['TRAIN']['lr_end']
+    input_size = config['TRAIN']['input_size']
     global_steps = tf.Variable(1, trainable=False, dtype=tf.int64)
     warmup_steps = config['TRAIN']['WARMUP_EPOCHS'] * steps_per_epoch
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
-    input_layer = tf.keras.layers.Input([INPUT_SIZE, INPUT_SIZE, 3])
-    STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(config)
+    input_layer = tf.keras.layers.Input([input_size, input_size, 3])
+    strides, anchors, num_class, xyscale = utils.load_config(config)
     freeze_layers = utils.load_freeze_layer(config['model_type'], config['tiny'])
-    feature_maps = YOLO(input_layer, NUM_CLASS, config['model_type'], config['tiny'])
+    feature_maps = YOLO(input_layer, num_class, config['model_type'], config['tiny'])
+    pretrain_path = config['TRAIN']['PRETRAIN']
+    weight_path = config['weight_path']
 
     if config['tiny']:
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, INPUT_SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i,
-                                           XYSCALE)
+                bbox_tensor = decode_train(fm, input_size // 16, num_class, strides, anchors, i,
+                                           xyscale)
             else:
-                bbox_tensor = decode_train(fm, INPUT_SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i,
-                                           XYSCALE)
+                bbox_tensor = decode_train(fm, input_size // 32, num_class, strides, anchors, i,
+                                           xyscale)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
     else:
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, INPUT_SIZE // 8, NUM_CLASS, STRIDES, ANCHORS, i,
-                                           XYSCALE)
+                bbox_tensor = decode_train(fm, input_size // 8, num_class, strides, anchors, i,
+                                           xyscale)
             elif i == 1:
-                bbox_tensor = decode_train(fm, INPUT_SIZE // 16, NUM_CLASS, STRIDES, ANCHORS, i,
-                                           XYSCALE)
+                bbox_tensor = decode_train(fm, input_size // 16, num_class, strides, anchors, i,
+                                           xyscale)
             else:
-                bbox_tensor = decode_train(fm, INPUT_SIZE // 32, NUM_CLASS, STRIDES, ANCHORS, i,
-                                           XYSCALE)
+                bbox_tensor = decode_train(fm, input_size // 32, num_class, strides, anchors, i,
+                                           xyscale)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
 
     model = tf.keras.Model(input_layer, bbox_tensors)
     model.summary()
 
-    if config['TRAIN']['PRETRAIN']:
-        if config['TRAIN']['PRETRAIN'].endswith('weights'):
-            utils.load_weights(model, config['TRAIN']['PRETRAIN'], config['model_type'], config['tiny'])
+    if pretrain_path:
+        if pretrain_path.endswith('weights'):
+            utils.load_weights(model, pretrain_path, config['model_type'], config['tiny'])
         else:
-            model.load_weights(config['TRAIN']['PRETRAIN'])
-        print('Train from %s' % (config['TRAIN']['PRETRAIN']))
+            model.load_weights(pretrain_path)
+        print('Train from %s' % (pretrain_path))
     else:
         print("Training from scratch")
 
@@ -92,8 +100,8 @@ def main(config_path):
             # optimizing process
             for i in range(len(freeze_layers)):
                 conv, pred = pred_result[i * 2], pred_result[i * 2 + 1]
-                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=STRIDES, NUM_CLASS=NUM_CLASS,
-                                          IOU_LOSS_THRESH=IOU_LOSS_THRESH, i=i)
+                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=strides, NUM_CLASS=num_class,
+                                          IOU_LOSS_THRESH=iou_loss_thresh, i=i)
                 giou_loss += loss_items[0]
                 conf_loss += loss_items[1]
                 prob_loss += loss_items[2]
@@ -109,12 +117,12 @@ def main(config_path):
             # update learning rate
             global_steps.assign_add(1)
             if global_steps < warmup_steps:
-                lr = global_steps / warmup_steps * LR_INIT
+                lr = global_steps / warmup_steps * lr_init
             else:
-                lr = LR_END + 0.5 * (LR_INIT - LR_END) * (
+                lr = lr_end + 0.5 * (lr_init - lr_end) * (
                     (1 + tf.cos((global_steps - warmup_steps) / (total_steps - warmup_steps) * np.pi))
                 )
-                config['TRAIN']['LR_INIT'] = float(lr)
+                config['TRAIN']['lr_init'] = float(lr)
             optimizer.lr.assign(lr.numpy())
 
             # writing summary data
@@ -134,8 +142,8 @@ def main(config_path):
             # optimizing process
             for i in range(len(freeze_layers)):
                 conv, pred = pred_result[i * 2], pred_result[i * 2 + 1]
-                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=STRIDES, NUM_CLASS=NUM_CLASS,
-                                          IOU_LOSS_THRESH=IOU_LOSS_THRESH, i=i)
+                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=strides, NUM_CLASS=num_class,
+                                          IOU_LOSS_THRESH=iou_loss_thresh, i=i)
                 giou_loss += loss_items[0]
                 conf_loss += loss_items[1]
                 prob_loss += loss_items[2]
@@ -163,12 +171,12 @@ def main(config_path):
             train_step(image_data, target)
         for image_data, target in testset:
             test_step(image_data, target)
-        model.save_weights(config['weight_path'])
-        config['TRAIN']['PRETRAIN'] = config['weight_path']
+        model.save_weights(weight_path)
+        config['TRAIN']['PRETRAIN'] = weight_path
         with open(config_path, 'w') as f:
             json.dump(config, fp=f)
 
-        print('model save %s' % config['weight_path'])
+        print('model save %s' % weight_path)
 
 
 if __name__ == '__main__':
