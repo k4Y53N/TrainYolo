@@ -112,10 +112,10 @@ def main(config_path):
 
             gradients = tape.gradient(total_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            print("=> STEP %4d/%4d   epoch: %d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
+            print("\r=> STEP %4d/%4d   epoch: %d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
                   "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, total_steps, epoch, optimizer.lr.numpy(),
                                                             giou_loss, conf_loss,
-                                                            prob_loss, total_loss), end='\r', flush=True)
+                                                            prob_loss, total_loss), end='', flush=True)
             # update learning rate
             global_steps.assign_add(1)
             if global_steps < warmup_steps:
@@ -152,9 +152,9 @@ def main(config_path):
 
             total_loss = giou_loss + conf_loss + prob_loss
 
-            print("=> TEST STEP %4d  epoch: %d  giou_loss: %4.2f   conf_loss: %4.2f   "
+            print("\r=> TEST STEP %4d  epoch: %d  giou_loss: %4.2f   conf_loss: %4.2f   "
                   "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, epoch, giou_loss, conf_loss,
-                                                            prob_loss, total_loss), end='\r', flush=True)
+                                                            prob_loss, total_loss), end='', flush=True)
 
     for epoch in range(init_epoch, total_stage_epochs):
         if epoch < first_stage_epochs:
