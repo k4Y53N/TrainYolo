@@ -29,14 +29,16 @@ def main(config_path):
     logdir = os.path.join('data', 'log', config['name'])
     isfreeze = False
     steps_per_epoch = len(trainset)
-    first_stage_epochs = config['TRAIN']['FISRT_STAGE_EPOCHS']
+    init_epoch = config['TRAIN']['INIT_EPOCH']
+    first_stage_epochs = config['TRAIN']['FIRST_STAGE_EPOCHS']
     second_stage_epochs = config['TRAIN']['SECOND_STAGE_EPOCHS']
+    total_stage_epochs = first_stage_epochs + second_stage_epochs
     iou_loss_thresh = config['YOLO']['IOU_LOSS_THRESH']
-    lr_init, lr_end = config['TRAIN']['lr_init'], config['TRAIN']['lr_end']
-    input_size = config['TRAIN']['input_size']
-    global_steps = tf.Variable(1, trainable=False, dtype=tf.int64)
+    lr_init, lr_end = config['TRAIN']['LR_INIT'], config['TRAIN']['LR_END']
+    input_size = config['TRAIN']['INPUT_SIZE']
     warmup_steps = config['TRAIN']['WARMUP_EPOCHS'] * steps_per_epoch
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
+    global_steps = tf.Variable(init_epoch * steps_per_epoch + 1, trainable=False, dtype=tf.int64)
     input_layer = tf.keras.layers.Input([input_size, input_size, 3])
     strides, anchors, num_class, xyscale = utils.load_config(config)
     freeze_layers = utils.load_freeze_layer(config['model_type'], config['tiny'])
@@ -71,7 +73,7 @@ def main(config_path):
             bbox_tensors.append(bbox_tensor)
 
     model = tf.keras.Model(input_layer, bbox_tensors)
-    model.summary()
+    # model.summary()
 
     if pretrain_path:
         if pretrain_path.endswith('weights'):
@@ -92,7 +94,7 @@ def main(config_path):
 
     # define training step function
     # @tf.function
-    def train_step(image_data, target):
+    def train_step(image_data, target, epoch=0):
         with tf.GradientTape() as tape:
             pred_result = model(image_data, training=True)
             giou_loss = conf_loss = prob_loss = 0
@@ -110,10 +112,10 @@ def main(config_path):
 
             gradients = tape.gradient(total_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            tf.print("=> STEP %4d/%4d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
-                     "prob_loss: %4.2f   total_loss: %4.2f" % (global_steps, total_steps, optimizer.lr.numpy(),
-                                                               giou_loss, conf_loss,
-                                                               prob_loss, total_loss))
+            print("=> STEP %4d/%4d   epoch: %d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
+                  "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, total_steps, epoch, optimizer.lr.numpy(),
+                                                            giou_loss, conf_loss,
+                                                            prob_loss, total_loss), end='\r', flush=True)
             # update learning rate
             global_steps.assign_add(1)
             if global_steps < warmup_steps:
@@ -134,7 +136,7 @@ def main(config_path):
                 tf.summary.scalar("loss/prob_loss", prob_loss, step=global_steps)
             writer.flush()
 
-    def test_step(image_data, target):
+    def test_step(image_data, target, epoch=0):
         with tf.GradientTape() as tape:
             pred_result = model(image_data, training=False)
             giou_loss = conf_loss = prob_loss = 0
@@ -150,11 +152,11 @@ def main(config_path):
 
             total_loss = giou_loss + conf_loss + prob_loss
 
-            tf.print("=> TEST STEP %4d   giou_loss: %4.2f   conf_loss: %4.2f   "
-                     "prob_loss: %4.2f   total_loss: %4.2f" % (global_steps, giou_loss, conf_loss,
-                                                               prob_loss, total_loss))
+            print("=> TEST STEP %4d  epoch: %d  giou_loss: %4.2f   conf_loss: %4.2f   "
+                  "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, epoch, giou_loss, conf_loss,
+                                                            prob_loss, total_loss), end='\r', flush=True)
 
-    for epoch in range(first_stage_epochs + second_stage_epochs):
+    for epoch in range(init_epoch, total_stage_epochs):
         if epoch < first_stage_epochs:
             if not isfreeze:
                 isfreeze = True
@@ -168,11 +170,14 @@ def main(config_path):
                     freeze = model.get_layer(name)
                     unfreeze_all(freeze)
         for image_data, target in trainset:
-            train_step(image_data, target)
+            train_step(image_data, target, epoch + 1)
+        print()
         for image_data, target in testset:
-            test_step(image_data, target)
+            test_step(image_data, target, epoch + 1)
+        print()
         model.save_weights(weight_path)
         config['TRAIN']['PRETRAIN'] = weight_path
+        config['TRAIN']['INIT_EPOCH'] = epoch + 1
         with open(config_path, 'w') as f:
             json.dump(config, fp=f)
 

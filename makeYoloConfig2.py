@@ -2,13 +2,13 @@ from sklearn.cluster import KMeans
 from pathlib import Path
 from threading import Thread
 from configparser import ConfigParser
-from scripts.utils import printdic
 import json
 import argparse
 import numpy as np
 import logging as log
 import os
 import pickle
+import sys
 
 """
 [Annotations]
@@ -51,8 +51,8 @@ class MakeYoloConfig:
         self.batch_size = batch_size
         self.epoch = epoch
         self.warmup_epochs = 2
-        self.first_stage_epochs = 0
-        self.second_stage_epochs = 0
+        self.first_stage_epochs = int(epoch * 1 / 5) if pretrain_file_path else 0
+        self.second_stage_epochs = epoch
         self.train_size = train_size
         self.test_size = val_size
         self.tiny = tiny
@@ -346,6 +346,7 @@ class MakeYoloConfig:
                 'LR_INIT': 1e-03,
                 'LR_END': 1e-06,
                 'WARMUP_EPOCHS': self.warmup_epochs,
+                'INIT_EPOCH': 0,
                 'FIRST_STAGE_EPOCHS': self.first_stage_epochs,
                 'SECOND_STAGE_EPOCHS': self.second_stage_epochs,
                 'PRETRAIN': str(self.pretrain_file) if self.pretrain_file else None,
@@ -359,13 +360,15 @@ class MakeYoloConfig:
                 'IOU_THRESHOLD': 0.5,
             }
         }
-        print('\n-----------CONFIG-----------')
-        printdic(self.yolo_config)
-        print('-----------END-----------')
 
         with self.yolo_config_file.open('w') as f:
             json.dump(self.yolo_config, f)
 
+        if sys.platform.startswith('linux'):
+            cmd = 'python3 -m json.tool %s' % (str(self.yolo_config_file.absolute()))
+        else:
+            cmd = 'python -m json.tool %s' % (str(self.yolo_config_file.absolute()))
+        os.system(cmd)
         log.info(f'Write YOLO Config to {self.yolo_config_file.absolute()}')
 
 
