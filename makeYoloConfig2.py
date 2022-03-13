@@ -147,7 +147,7 @@ class MakeYoloConfig:
 
         for ex_file in checking_exist_file_group:
             if not ex_file.is_file():
-                raise FileNotFoundError(ex_file.absolute())
+                raise FileNotFoundError(str(ex_file.absolute()))
 
         for mk_dir in make_dirs:
             if not mk_dir.is_dir():
@@ -155,7 +155,7 @@ class MakeYoloConfig:
 
         if self.pretrain_file:
             if not self.pretrain_file.is_file():
-                raise FileNotFoundError(self.pretrain_file.absolute())
+                raise FileNotFoundError(str(self.pretrain_file.absolute()))
 
     def load_classes(self):
         with self.classes_file.open('r') as f:
