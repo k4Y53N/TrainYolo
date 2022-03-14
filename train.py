@@ -38,6 +38,7 @@ def main(config_path):
 
     pretrain_path = configer.pre_train_file_path
     weight_path = configer.weight_path
+    model_path = configer.model_path
     if tiny:
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
@@ -108,7 +109,6 @@ def main(config_path):
                 lr = lr_end + 0.5 * (lr_init - lr_end) * (
                     (1 + tf.cos((global_steps - warmup_steps) / (total_steps - warmup_steps) * np.pi))
                 )
-                configer.update_lr_init(float(lr))
             optimizer.lr.assign(lr.numpy())
 
             # writing summary data
@@ -160,6 +160,7 @@ def main(config_path):
             test_step(image_data, target, epoch + 1)
         print()
         model.save_weights(weight_path)
+        model.save(model_path)
         configer.update_pre_train_file_path(weight_path)
         configer.update_init_epoch(epoch + 1)
         configer.save()

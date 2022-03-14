@@ -10,18 +10,6 @@ import os
 import pickle
 import sys
 
-"""
-[Annotations]
-train_set_dir = data/train2014
-train_annotation_path = data/instances_train2014.json
-test_set_dir = data/val2014
-test_annotation_path = data/instances_val2014.json
-
-[Save_dir]
-checkpoints_save_dir = checkpoints
-weights_save_dir = checkpoints/weights
-"""
-
 
 class MakeYoloConfig:
     def __init__(
@@ -203,13 +191,14 @@ class MakeYoloConfig:
                 bf.write(str(image_file.absolute()) + ' ')
 
                 for item in image['items']:
-                    x_min = int(item['bbox'][0])
-                    y_min = int(item['bbox'][1])
-                    x_max = x_min + int(item['bbox'][2])
-                    y_max = y_min + int(item['bbox'][3])
+                    bbox = item['bbox']
+                    x_min = int(bbox[0])
+                    y_min = int(bbox[1])
+                    x_max = x_min + int(bbox[2])
+                    y_max = y_min + int(bbox[3])
                     anchor_boxes.append(
-                        (item['bbox'][2],
-                         item['bbox'][3],
+                        (bbox[2],
+                         bbox[3],
                          image['width'],
                          image['height'])
                     )
@@ -320,8 +309,9 @@ class MakeYoloConfig:
     def write_yolo_config(self):
         self.yolo_config = {
             'name': self.name,
-            'model_path': str(self.model_save_dir / self.name),
+            'model_path': str(self.model_save_dir),
             'weight_path': str((self.weights_save_dir / self.name).with_suffix('.h5')),
+            'logdir': str(self.logdir),
             'frame_work': str(self.frame_work),
             'model_type': str(self.model_type),
             'size': self.size,
@@ -329,8 +319,7 @@ class MakeYoloConfig:
             'max_output_size_per_class': 40,
             'max_total_size': 50,
             'iou_threshold': 0.5,
-            'score_threshold': 0.25 if self.tiny else 0.5,
-            'logdir': str(self.logdir),
+            'score_threshold': self.score_threshold,
             'YOLO': {
                 'CLASSES': self.classes,
                 'ANCHORS': self.anchors,
@@ -361,7 +350,7 @@ class MakeYoloConfig:
                 'BATCH_SIZE': self.batch_size,
                 'INPUT_SIZE': self.size,
                 'DATA_AUG': False,
-                'SCORE_THRESHOLD': 0.25 if self.tiny else 0.5,
+                'SCORE_THRESHOLD': self.score_threshold,
                 'IOU_THRESHOLD': 0.5,
             }
         }

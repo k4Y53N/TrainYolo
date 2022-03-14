@@ -72,10 +72,6 @@ class YOLOConfiger:
         self.pre_train_file_path = pre_train_file_path
         self.config['TRAIN']['PRETRAIN'] = pre_train_file_path
 
-    def update_lr_init(self, lr_init: float):
-        self.lr_init = lr_init
-        self.config['TRAIN']['LR_INIT'] = lr_init
-
     def save(self):
         with open(self.config_path, 'w') as f:
             json.dump(self.config, f)
