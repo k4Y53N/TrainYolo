@@ -38,7 +38,7 @@ class MakeYoloConfig:
             train_size: int = 1000,
             val_size: int = 200,
             tiny: bool = False,
-
+            score_threshold: float = 0.25
     ):
         self.sys_config = ConfigParser()
         self.sys_config_file = Path(sys_config_path)
@@ -48,6 +48,7 @@ class MakeYoloConfig:
         self.model_type = model_type
         self.frame_work = frame_work
         self.size = size
+        self.score_threshold = score_threshold
         self.batch_size = batch_size
         self.epoch = epoch
         self.warmup_epochs = 2
@@ -74,6 +75,7 @@ class MakeYoloConfig:
         self.test_bbox_save_dir: Path = Path()
         self.train_bbox_file: Path = Path()
         self.test_bbox_file: Path = Path()
+        self.logdir: Path = Path()
 
     def make(self):
         self.check_all_paths()
@@ -122,6 +124,7 @@ class MakeYoloConfig:
         self.test_bbox_save_dir = Path(self.sys_config['Save_dir']['test_processed_data'])
         self.train_bbox_file = self.train_bbox_save_dir / Path(self.name).with_suffix('.bbox')
         self.test_bbox_file = self.test_bbox_save_dir / Path(self.name).with_suffix('.bbox')
+        self.logdir = Path(self.sys_config['Save_dir']['logs']) / Path(self.name)
 
         checking_exist_dir_group = (
             self.train_set_dir,
@@ -139,6 +142,7 @@ class MakeYoloConfig:
             self.weights_save_dir,
             self.train_bbox_save_dir,
             self.test_bbox_save_dir,
+            self.logdir
         )
 
         for ex_dir in checking_exist_dir_group:
@@ -326,6 +330,7 @@ class MakeYoloConfig:
             'max_total_size': 50,
             'iou_threshold': 0.5,
             'score_threshold': 0.25 if self.tiny else 0.5,
+            'logdir': str(self.logdir),
             'YOLO': {
                 'CLASSES': self.classes,
                 'ANCHORS': self.anchors,
@@ -386,7 +391,8 @@ def main(args):
             batch_size=args.batch_size,
             epoch=args.epoch,
             train_size=args.train_size,
-            val_size=args.val_size
+            val_size=args.val_size,
+            score_threshold=args.score_threshold
         )
         myc.make()
     except Exception as E:
@@ -409,6 +415,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model', type=str, default='yolov4', choices=['yolov4', 'yolov3'], help='Model type')
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
                         help='Frame work type')
+    parser.add_argument('-sc', '--score_threshold', type=float, default=0.25, help='Object score threshold')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
     parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
     parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
@@ -417,9 +424,3 @@ if __name__ == '__main__':
     parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
     args = parser.parse_args()
     main(args)
-    # sys_config_path = 'sys.conf'
-    # name = 'test3'
-    # cls = 'data/classes/person.txt'
-    # mk = MakeYoloConfig(name, cls, sys_config_path)
-    # mk.make()
-    # pprint(mk.__dict__)

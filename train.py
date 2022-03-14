@@ -1,5 +1,3 @@
-import os
-import shutil
 import tensorflow as tf
 import numpy as np
 import argparse
@@ -7,6 +5,7 @@ import json
 from core.yolov4 import YOLO, compute_loss, decode_train
 from core.utils import freeze_all, unfreeze_all
 from core.dataset import Dataset
+from core.configer import Configer
 from core import utils
 
 
@@ -21,12 +20,12 @@ def main(config_path):
     # physical_devices = tf.config.list_physical_devices('GPU')
     # if len(physical_devices) > 0:
     #     tf.config.experimental.set_memory_growth(physical_devices[0], True)
-
+    configer = Configer(config_path)
     config = load_json(config_path)
 
     trainset = Dataset(config, is_training=True)
     testset = Dataset(config, is_training=False)
-    logdir = os.path.join('data', 'log', config['name'])
+    logdir = config['logdir']
     isfreeze = False
     steps_per_epoch = len(trainset)
     init_epoch = config['TRAIN']['INIT_EPOCH']
@@ -85,11 +84,6 @@ def main(config_path):
         print("Training from scratch")
 
     optimizer = tf.keras.optimizers.Adam()
-    if os.path.exists(logdir):
-        shutil.rmtree(logdir)
-        os.makedirs(logdir)
-    else:
-        os.makedirs(logdir)
     writer = tf.summary.create_file_writer(logdir)
 
     # define training step function

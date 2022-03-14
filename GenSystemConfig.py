@@ -5,6 +5,7 @@ default_save_dir = {
     'checkpoints': str(Path('./checkpoints')),
     'weights': str(Path('./weights')),
     'configs': str(Path('./configs')),
+    'logs': str(Path('./logs')),
     'train_processed_data': str(Path('./data') / 'bbox' / 'train'),
     'test_processed_data': str(Path('./data') / 'bbox' / 'test'),
 }
