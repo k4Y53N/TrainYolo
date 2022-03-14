@@ -4,7 +4,7 @@ import random
 import numpy as np
 import tensorflow as tf
 import core.utils as utils
-from configer import YOLOConfiger
+from core.configer import YOLOConfiger
 
 
 class Dataset(object):
