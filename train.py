@@ -1,58 +1,51 @@
 import tensorflow as tf
 import numpy as np
 import argparse
-import json
 from core.yolov4 import YOLO, compute_loss, decode_train
 from core.utils import freeze_all, unfreeze_all
 from core.dataset import Dataset
-from core.configer import Configer
+from core.configer import YOLOConfiger
 from core import utils
 
 
-def load_json(config_path) -> dict:
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-
-    return config
-
-
 def main(config_path):
-    # physical_devices = tf.config.list_physical_devices('GPU')
-    # if len(physical_devices) > 0:
-    #     tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    configer = Configer(config_path)
-    config = load_json(config_path)
-
-    trainset = Dataset(config, is_training=True)
-    testset = Dataset(config, is_training=False)
-    logdir = config['logdir']
+    configer = YOLOConfiger(config_path)
+    model_type = configer.model_type
+    tiny = configer.tiny
+    trainset = Dataset(configer, is_training=True)
+    testset = Dataset(configer, is_training=False)
+    logdir = configer.logdir
     isfreeze = False
     steps_per_epoch = len(trainset)
-    init_epoch = config['TRAIN']['INIT_EPOCH']
-    first_stage_epochs = config['TRAIN']['FIRST_STAGE_EPOCHS']
-    second_stage_epochs = config['TRAIN']['SECOND_STAGE_EPOCHS']
+    init_epoch = configer.init_epoch
+    first_stage_epochs = configer.first_stage_epochs
+    second_stage_epochs = configer.second_stage_epochs
     total_stage_epochs = first_stage_epochs + second_stage_epochs
-    iou_loss_thresh = config['YOLO']['IOU_LOSS_THRESH']
-    lr_init, lr_end = config['TRAIN']['LR_INIT'], config['TRAIN']['LR_END']
-    input_size = config['TRAIN']['INPUT_SIZE']
-    warmup_steps = config['TRAIN']['WARMUP_EPOCHS'] * steps_per_epoch
+    iou_loss_thresh = configer.iou_loss_thresh
+    lr_init = configer.lr_init
+    lr_end = configer.lr_end
+    size = configer.size
+    warmup_steps = configer.warmup_epochs * steps_per_epoch
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
     global_steps = tf.Variable(init_epoch * steps_per_epoch + 1, trainable=False, dtype=tf.int64)
-    input_layer = tf.keras.layers.Input([input_size, input_size, 3])
-    strides, anchors, num_class, xyscale = utils.load_config(config)
-    freeze_layers = utils.load_freeze_layer(config['model_type'], config['tiny'])
-    feature_maps = YOLO(input_layer, num_class, config['model_type'], config['tiny'])
-    pretrain_path = config['TRAIN']['PRETRAIN']
-    weight_path = config['weight_path']
+    input_layer = tf.keras.layers.Input([size, size, 3])
+    strides = configer.strides
+    anchors = configer.anchors
+    num_class = configer.num_class
+    xyscale = configer.xyscale
+    freeze_layers = configer.freeze_layers
+    feature_maps = YOLO(input_layer, num_class, configer.model_type, configer.tiny)
 
-    if config['tiny']:
+    pretrain_path = configer.pre_train_file_path
+    weight_path = configer.weight_path
+    if tiny:
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, input_size // 16, num_class, strides, anchors, i,
+                bbox_tensor = decode_train(fm, size // 16, num_class, strides, anchors, i,
                                            xyscale)
             else:
-                bbox_tensor = decode_train(fm, input_size // 32, num_class, strides, anchors, i,
+                bbox_tensor = decode_train(fm, size // 32, num_class, strides, anchors, i,
                                            xyscale)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
@@ -60,23 +53,22 @@ def main(config_path):
         bbox_tensors = []
         for i, fm in enumerate(feature_maps):
             if i == 0:
-                bbox_tensor = decode_train(fm, input_size // 8, num_class, strides, anchors, i,
+                bbox_tensor = decode_train(fm, size // 8, num_class, strides, anchors, i,
                                            xyscale)
             elif i == 1:
-                bbox_tensor = decode_train(fm, input_size // 16, num_class, strides, anchors, i,
+                bbox_tensor = decode_train(fm, size // 16, num_class, strides, anchors, i,
                                            xyscale)
             else:
-                bbox_tensor = decode_train(fm, input_size // 32, num_class, strides, anchors, i,
+                bbox_tensor = decode_train(fm, size // 32, num_class, strides, anchors, i,
                                            xyscale)
             bbox_tensors.append(fm)
             bbox_tensors.append(bbox_tensor)
 
     model = tf.keras.Model(input_layer, bbox_tensors)
-    # model.summary()
 
     if pretrain_path:
         if pretrain_path.endswith('weights'):
-            utils.load_weights(model, pretrain_path, config['model_type'], config['tiny'])
+            utils.load_weights(model, pretrain_path, model_type, tiny)
         else:
             model.load_weights(pretrain_path)
         print('Train from %s' % (pretrain_path))
@@ -86,8 +78,6 @@ def main(config_path):
     optimizer = tf.keras.optimizers.Adam()
     writer = tf.summary.create_file_writer(logdir)
 
-    # define training step function
-    # @tf.function
     def train_step(image_data, target, epoch=0):
         with tf.GradientTape() as tape:
             pred_result = model(image_data, training=True)
@@ -118,7 +108,7 @@ def main(config_path):
                 lr = lr_end + 0.5 * (lr_init - lr_end) * (
                     (1 + tf.cos((global_steps - warmup_steps) / (total_steps - warmup_steps) * np.pi))
                 )
-                config['TRAIN']['lr_init'] = float(lr)
+                configer.update_lr_init(float(lr))
             optimizer.lr.assign(lr.numpy())
 
             # writing summary data
@@ -170,11 +160,9 @@ def main(config_path):
             test_step(image_data, target, epoch + 1)
         print()
         model.save_weights(weight_path)
-        config['TRAIN']['PRETRAIN'] = weight_path
-        config['TRAIN']['INIT_EPOCH'] = epoch + 1
-        with open(config_path, 'w') as f:
-            json.dump(config, fp=f)
-
+        configer.update_pre_train_file_path(weight_path)
+        configer.update_init_epoch(epoch + 1)
+        configer.save()
         print('model save %s' % weight_path)
 
 

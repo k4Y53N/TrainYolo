@@ -1,35 +1,28 @@
-#! /usr/bin/env python
-# coding=utf-8
-
 import os
 import cv2
 import random
 import numpy as np
 import tensorflow as tf
 import core.utils as utils
+from configer import YOLOConfiger
 
 
 class Dataset(object):
     """implement Dataset here"""
 
-    def __init__(self, config, is_training: bool, dataset_type: str = "converted_coco"):
-        self.tiny = config['tiny']
-        self.strides, self.anchors, NUM_CLASS, XYSCALE = utils.load_config(config)
+    def __init__(self, configer: YOLOConfiger, is_training: bool, dataset_type: str = "converted_coco"):
+        self.tint = configer.tiny
+        self.strides = configer.strides
+        self.anchors = configer.anchors
+        self.xyscale = configer.xyscale
         self.dataset_type = dataset_type
-        self.annot_path = (
-            config['TRAIN']['ANNOT_PATH'] if is_training else config['TEST']['ANNOT_PATH']
-        )
-        self.input_sizes = (
-            config['TRAIN']['INPUT_SIZE'] if is_training else config['TEST']['INPUT_SIZE']
-        )
-        self.batch_size = (
-            config['TRAIN']['BATCH_SIZE'] if is_training else config['TEST']['BATCH_SIZE']
-        )
-        self.data_aug = config['TRAIN']['DATA_AUG'] if is_training else config['TEST']['DATA_AUG']
-        self.train_input_size = config['TRAIN']['INPUT_SIZE']
-        self.classes = utils.read_class_names(config['YOLO']['CLASSES'])
-        self.num_classes = len(self.classes)
-        self.anchor_per_scale = config['YOLO']['ANCHOR_PER_SCALE']
+        self.annot_path = configer.train_annot_path if is_training else configer.test_annot_path
+        self.input_size = configer.size
+        self.batch_size = configer.train_batch_size if is_training else configer.test_batch_size
+        self.data_aug = is_training
+        self.train_input_size = configer.size
+        self.num_classes = len(configer.classes)
+        self.anchor_per_scale = configer.anchor_per_scale
         self.max_bbox_per_scale = 150
         self.annotations = self.load_annotations()
         self.num_samples = len(self.annotations)
