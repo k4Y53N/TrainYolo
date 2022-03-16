@@ -160,7 +160,7 @@ def main(config_path):
             test_step(image_data, target, epoch + 1)
         print()
         model.save_weights(weight_path)
-        model.save(model_path)
+        # model.save(model_path)
         configer.update_pre_train_file_path(weight_path)
         configer.update_init_epoch(epoch + 1)
         configer.save()
