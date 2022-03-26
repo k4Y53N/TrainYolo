@@ -309,9 +309,9 @@ class MakeYoloConfig:
     def write_yolo_config(self):
         self.yolo_config = {
             'name': self.name,
-            'model_path': str(self.model_save_dir),
-            'weight_path': str((self.weights_save_dir / self.name).with_suffix('.h5')),
-            'logdir': str(self.logdir),
+            'model_path': self.model_save_dir.as_posix(),
+            'weight_path': (self.weights_save_dir / self.name).with_suffix('.h5').as_posix(),
+            'logdir': self.logdir.as_posix(),
             'frame_work': str(self.frame_work),
             'model_type': str(self.model_type),
             'size': self.size,
@@ -333,7 +333,7 @@ class MakeYoloConfig:
                 'IOU_LOSS_THRESH': 0.5,
             },
             'TRAIN': {
-                'ANNOT_PATH': str(self.train_bbox_file),
+                'ANNOT_PATH': self.train_bbox_file.as_posix(),
                 'BATCH_SIZE': self.batch_size,
                 'INPUT_SIZE': self.size,
                 'DATA_AUG': True,
@@ -346,7 +346,7 @@ class MakeYoloConfig:
                 'PRETRAIN': str(self.pretrain_file) if self.pretrain_file else None,
             },
             'TEST': {
-                'ANNOT_PATH': str(self.test_bbox_file),
+                'ANNOT_PATH': self.test_bbox_file.as_posix(),
                 'BATCH_SIZE': self.batch_size,
                 'INPUT_SIZE': self.size,
                 'DATA_AUG': False,
