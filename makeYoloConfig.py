@@ -1,397 +1,415 @@
+from sklearn.cluster import KMeans
+from pathlib import Path
+from threading import Thread
+from configparser import ConfigParser
 import json
 import argparse
 import numpy as np
-import configparser
-import logging
-from sklearn.cluster import KMeans
-from pathlib import Path
-from scripts.utils import printdic
-from multiprocessing import Pool, cpu_count
-
-logging.basicConfig(
-    format='%(asctime)s %(levelname)s:%(message)s',
-    datefmt='%Y/%m/%d %H:%M:%S',
-    level=logging.INFO
-)
+import logging as log
+import os
+import pickle
+import sys
 
 
-def JSON_parser(cfg_path):
-    """
-    :param cfg_path: config file path
-    :return: config
-    """
-    with open(cfg_path, 'r') as f:
-        config = json.load(f)
-    return config
+class MakeYoloConfig:
+    def __init__(
+            self,
+            config_file_name: str,
+            classes_file_path: str,
+            sys_config_path: str = './sys.ini',
+            pretrain_file_path: str = '',
+            model_type: str = 'yolov4',
+            frame_work: str = 'tf',
+            size: int = 416,
+            batch_size: int = 4,
+            epoch: int = 30,
+            train_size: int = 1000,
+            val_size: int = 200,
+            tiny: bool = False,
+            score_threshold: float = 0.25
+    ):
+        self.sys_config = ConfigParser()
+        self.sys_config_file = Path(sys_config_path)
+        self.name = config_file_name
+        self.classes_file = Path(classes_file_path)
+        self.pretrain_file = Path(pretrain_file_path) if pretrain_file_path else None
+        self.model_type = model_type
+        self.frame_work = frame_work
+        self.size = size
+        self.score_threshold = score_threshold
+        self.batch_size = batch_size
+        self.epoch = epoch
+        self.warmup_epochs = 2
+        self.first_stage_epochs = int(epoch * 1 / 5) if pretrain_file_path else 0
+        self.second_stage_epochs = epoch
+        self.train_size = train_size
+        self.test_size = val_size
+        self.tiny = tiny
+        self.yolo_config = {}
+        self.classes = []
+        self.anchors = []
+        self.anchors_v3 = []
+        self.anchors_tiny = []
+        self.yolo_config_file: Path = Path()
+        self.model_save_dir: Path = Path()
+        self.train_set_dir: Path = Path()
+        self.train_annotation_file: Path = Path()
+        self.test_set_dir: Path = Path()
+        self.test_annotation_file: Path = Path()
+        self.checkpoints_save_dir: Path = Path()
+        self.weights_save_dir: Path = Path()
+        self.configs_save_dir: Path = Path()
+        self.train_bbox_save_dir: Path = Path()
+        self.test_bbox_save_dir: Path = Path()
+        self.train_bbox_file: Path = Path()
+        self.test_bbox_file: Path = Path()
+        self.logdir: Path = Path()
 
+    def make(self):
+        self.check_all_paths()
+        self.load_classes()
+        train = Thread(
+            target=self.write,
+            args=(self.train_annotation_file, self.train_bbox_file, True)
+        )
+        test = Thread(
+            target=self.write,
+            args=(self.test_annotation_file, self.test_bbox_file, False)
+        )
+        train.start()
+        test.start()
+        train.join()
+        test.join()
 
-def load_class(class_path):
-    """
-    :param class_path: classes file path
-    :return: classes
-    """
-    class_path = Path(class_path)
-    if not class_path.exists():
-        raise Exception('Classes file path does not exists.')
+        if self.train_bbox_file.is_file() and self.test_bbox_file.is_file():
+            self.yolo_config['name'] = self.name
+            self.yolo_config['model_path'] = self.model_type
+        else:
+            self.yolo_config_file.unlink(missing_ok=True)
+            self.train_bbox_file.unlink(missing_ok=True)
+            self.test_bbox_file.unlink(missing_ok=True)
+            raise RuntimeError('Writing Train bbox file or Test box file fail')
 
-    with class_path.open('r') as f:
-        classes = [line.strip() for line in f.readlines()]
-    return classes
+        self.write_yolo_config()
 
+    def check_all_paths(self):
+        if self.sys_config_file.is_file():
+            log.info(f'System config file path: {self.sys_config_file.absolute()}')
+            self.sys_config.read(self.sys_config_file.name)
+        else:
+            raise FileNotFoundError(self.sys_config_file.name)
 
-def write_config(config: dict, dst):
-    """
-    :param config: config dict
-    :param dst: destination
-    :return: None
-    """
+        self.train_set_dir = Path(self.sys_config['Annotations']['train_set_dir'])
+        self.train_annotation_file = Path(self.sys_config['Annotations']['train_annotation_path'])
+        self.test_set_dir = Path(self.sys_config['Annotations']['test_set_dir'])
+        self.test_annotation_file = Path(self.sys_config['Annotations']['test_annotation_path'])
+        self.checkpoints_save_dir = Path(self.sys_config['Save_dir']['checkpoints'])
+        self.weights_save_dir = Path(self.sys_config['Save_dir']['weights'])
+        self.configs_save_dir = Path(self.sys_config['Save_dir']['configs'])
+        self.yolo_config_file = self.configs_save_dir / Path(self.name).with_suffix('.json')
+        self.model_save_dir = self.checkpoints_save_dir / self.name
+        self.train_bbox_save_dir = Path(self.sys_config['Save_dir']['train_processed_data'])
+        self.test_bbox_save_dir = Path(self.sys_config['Save_dir']['test_processed_data'])
+        self.train_bbox_file = self.train_bbox_save_dir / Path(self.name).with_suffix('.bbox')
+        self.test_bbox_file = self.test_bbox_save_dir / Path(self.name).with_suffix('.bbox')
+        self.logdir = Path(self.sys_config['Save_dir']['logs']) / Path(self.name)
 
-    config_save_path = Path(dst)
-    if config_save_path.exists():
-        logging.warning(f'file : {config_save_path} is exist and will be replace.')
-    with config_save_path.open('w') as f:
-        json.dump(config, fp=f)
-    logging.info(f'Config save at {config_save_path}')
+        checking_exist_dir_group = (
+            self.train_set_dir,
+            self.test_set_dir,
+        )
 
+        checking_exist_file_group = (
+            self.classes_file,
+            self.train_annotation_file,
+            self.test_annotation_file,
+        )
 
-def load_JSON_file(anno_path: str, classes):
-    """
-    :param anno_path: coco dataset annotation file path
-    :param classes: classes name of dataset
-    :return: dict:{
-                Image_id:{
-                    'file_name':name
-                    'width':image width
-                    'height':image height
-                    'items':[  ->list
-                        {
-                            'bbox':bounding box
-                            'category_name':class name of bbox
-                        }
-                    ]
-                },
-                Classes:[classes name]
-            }
-    """
+        make_dirs = (
+            self.checkpoints_save_dir,
+            self.weights_save_dir,
+            self.train_bbox_save_dir,
+            self.test_bbox_save_dir,
+            self.logdir
+        )
 
-    with open(anno_path, 'r') as f:
-        logging.info(f'loading annotation file {anno_path}')
-        data = json.load(f)
-        logging.info(f'load annotation file {anno_path} finished')
-        np.random.shuffle(data['images'])
-        np.random.shuffle(data['annotations'])
+        for ex_dir in checking_exist_dir_group:
+            if not ex_dir.is_dir():
+                raise NotADirectoryError(ex_dir.absolute())
 
-    cats = {
-        cat['id']: cat['name']
-        for cat in data['categories'] if cat['name'] in classes
-    }
-    if len(cats) <= 0:
-        raise Exception('Cant fine any classes in annotation file')
+        for ex_file in checking_exist_file_group:
+            if not ex_file.is_file():
+                raise FileNotFoundError(str(ex_file.absolute()))
 
-    annos = (anno for anno in data['annotations'] if anno['category_id'] in cats.keys())
+        for mk_dir in make_dirs:
+            if not mk_dir.is_dir():
+                os.makedirs(mk_dir.absolute(), exist_ok=True)
 
-    imgs = {
-        img['id']: {
-            'file_name': img['file_name'],
-            'width': img['width'],
-            'height': img['height'],
-            'items': []
+        if self.pretrain_file:
+            if not self.pretrain_file.is_file():
+                raise FileNotFoundError(str(self.pretrain_file.absolute()))
+
+    def load_classes(self):
+        with self.classes_file.open('r') as f:
+            self.classes = [line.strip() for line in f.readlines()]
+
+    def write(self, annotation_file: Path, bbox_file: Path, training: bool):
+        try:
+            self.write_coco2yolo(annotation_file, bbox_file, training)
+        except Exception as e:
+            log.error(f'{e.__class__.__name__}({e.args})', exc_info=True)
+            if training:
+                self.train_bbox_file.unlink(missing_ok=True)
+            else:
+                self.test_bbox_file.unlink(missing_ok=True)
+
+    def write_coco2yolo(self, annotation_file: Path, bbox_file: Path, training: bool):
+        images, classes = self.load_annotation_file(annotation_file)
+        classes = {
+            class_name: index
+            for index, class_name in enumerate(classes)
         }
-        for img in data['images']
-    }
+        done = 0
+        anchor_boxes = []
 
-    for anno in annos:
-        _id = anno['image_id']
-        imgs[_id]['items'].append(
-            {
-                'bbox': anno['bbox'],
-                'category_name': cats[anno['category_id']]
+        if training:
+            data_save_dir = self.train_set_dir
+            set_size = self.train_size
+        else:
+            data_save_dir = self.test_set_dir
+            set_size = self.test_size
+
+        with bbox_file.open('w') as bf:
+            for image in images:
+                image_file = data_save_dir / image['file_name']
+
+                if done >= set_size:
+                    break
+                if not image_file.is_file() or len(image['items']) < 1:
+                    continue
+
+                bf.write(str(image_file.absolute()) + ' ')
+
+                for item in image['items']:
+                    bbox = item['bbox']
+                    x_min = int(bbox[0])
+                    y_min = int(bbox[1])
+                    x_max = x_min + int(bbox[2])
+                    y_max = y_min + int(bbox[3])
+                    anchor_boxes.append(
+                        (bbox[2],
+                         bbox[3],
+                         image['width'],
+                         image['height'])
+                    )
+
+                    x_min, y_min, x_max, y_max = str(x_min), str(y_min), str(x_max), str(y_max)
+                    label = str(classes[item['category_name']])
+                    bf.write(','.join([x_min, y_min, x_max, y_max, label]) + ' ')
+
+                bf.write('\n')
+                done += 1
+
+        if done < 1:
+            raise RuntimeError('bbox file did not have any images')
+        log.info(f'{bbox_file.name} have {done} images')
+
+        if training:
+            self.calculate_anchor_box(anchor_boxes)
+            self.classes = list(classes.keys())
+
+    def load_annotation_file(self, file: Path):
+        if file.suffix == '.pickle':
+            with file.open('rb') as f:
+                log.info(f'Start loading annotation file: {file.absolute()}')
+                data = pickle.load(f)
+                np.random.shuffle(data['images'])
+                np.random.shuffle(data['annotations'])
+                log.info(f'loading annotation file: {file.absolute()} finish')
+        elif file.suffix == '.json':
+            with file.open('r') as f:
+                log.info(f'Start loading annotation file: {file.absolute()}')
+                data = json.load(f)
+                np.random.shuffle(data['images'])
+                np.random.shuffle(data['annotations'])
+                log.info(f'loading annotation file: {file.absolute()} finish')
+        else:
+            raise RuntimeError('Unknown file suffix')
+
+        return self._filter(data)
+
+    def _filter(self, data):
+        cats = {
+            cat['id']: cat['name']
+            for cat in data['categories'] if cat['name'] in self.classes
+        }
+
+        if len(cats) < 1:
+            raise RuntimeError('Can not find any classes in annotation file')
+
+        annos = (
+            anno for anno in data['annotations']
+            if anno['category_id'] in cats.keys()
+        )
+
+        images = {
+            img['id']: {
+                'file_name': img['file_name'],
+                'width': img['width'],
+                'height': img['height'],
+                'items': []
             }
-        )
+            for img in data['images']
+        }
 
-    cats = [name for name in cats.values()]
-
-    return imgs, cats
-
-
-def cal_kMeans(w_h, tiny):
-    """
-    :param w_h: [width, height] array
-    :param tiny: if tiny = true , k =6 , else k =3
-    :return: cluster centers (anchor box)
-    """
-    k = 6 if tiny else 9
-
-    x = np.array(w_h)
-    kmeans = KMeans(n_clusters=k).fit(x)
-    cluster = kmeans.cluster_centers_
-
-    dot = [box[0] * box[1] for box in cluster]
-    args = np.argsort(dot)
-    arranged = np.zeros_like(cluster, int)
-
-    for i, arg in enumerate(args):
-        arranged[i] = cluster[arg]
-
-    return arranged.reshape(-1).tolist()
-
-
-def calculate_anchor_box(bbox_wh_img_size, size):
-    """
-    calculate anchor box
-    @param bbox_wh_img_size: [bbox_width, bbox_height, image_width, image_height]
-    @return: [[anchor box with k=9], [anchor box with k=6]]
-    """
-    w_h = tuple(
-        (
-            box[0] / box[2] * size,
-            box[1] / box[3] * size
-        )
-        for box in bbox_wh_img_size
-    )
-    return [
-        cal_kMeans(w_h, tiny=False),
-        cal_kMeans(w_h, tiny=True)
-    ]
-
-
-def write_coco2yolo_file(
-        anno_file_path,
-        classes,
-        data_set_dir,
-        yolo_file_save_path,
-        set_size,
-        class_file_name='',
-        train=False
-):
-    """
-    :param anno_file_path: coco annotations file path
-    :param data_set_dir: yolo format save path
-    :param classes: [classes name]
-    :param set_size: how many image need to write
-    :param yolo_file_save_path: yolo format file save path
-    :param class_file_name: class json file name
-    :param train: if train will write class name to json file save in data/classes/class_file_name
-    :return: bbox_wh_img_size: [bbox_width, bbox_height, image_width, image_height]
-    """
-
-    anno_file_path = Path(anno_file_path)
-    data_set_dir = Path(data_set_dir)
-    yolo_file_save_path = Path(yolo_file_save_path)
-
-    if not anno_file_path.is_file():
-        logging.error(f'{anno_file_path} does not exists')
-        raise FileNotFoundError(f'{anno_file_path}')
-    if not data_set_dir.is_dir():
-        logging.error(f'dir: {data_set_dir} not effective')
-        raise NotADirectoryError(f'{data_set_dir}')
-    if yolo_file_save_path.is_file():
-        logging.warning(f'{yolo_file_save_path} will be replace')
-
-    yolo_file = yolo_file_save_path.open('w')
-    images, classes = load_JSON_file(anno_file_path, classes)
-    classes = {
-        name: index
-        for index, name in enumerate(classes)
-    }
-    done = 0
-    bbox_wh_img_size = []
-
-    for img in images.values():
-        file_path = Path(data_set_dir) / img['file_name']
-
-        if done >= set_size:
-            break
-        if not file_path.exists() or len(img['items']) < 1:
-            continue
-
-        yolo_file.write(str(file_path))
-        yolo_file.write(' ')
-        for item in img['items']:
-            xmin = int(item['bbox'][0])
-            ymin = int(item['bbox'][1])
-            xmax = xmin + int(item['bbox'][2])
-            ymax = ymin + int(item['bbox'][3])
-            bbox_wh_img_size.append(
-                (item['bbox'][2],
-                 item['bbox'][3],
-                 img['width'],
-                 img['height'])
+        for anno in annos:
+            image_id = anno['image_id']
+            images[image_id]['items'].append(
+                {
+                    'bbox': anno['bbox'],
+                    'category_name': cats[anno['category_id']]
+                }
             )
 
-            xmin, ymin, xmax, ymax = str(xmin), str(ymin), str(xmax), str(ymax)
+        images = (
+            img for img in images.values() if len(img['items']) > 0
+        )
 
-            label = str(classes[item['category_name']])
-            yolo_file.write(','.join([xmin, ymin, xmax, ymax, label]) + ' ')
-        yolo_file.write('\n')
-        done += 1
-    yolo_file.close()
+        cats = (class_name for class_name in cats.values())
 
-    if train:
-        class_file = Path('data') / 'classes' / (class_file_name + '.txt')
-        if class_file.is_file():
-            logging.warning(f'file {class_file} will be replace')
-        with class_file.open('w') as f:
-            json.dump(classes, fp=f)
+        return images, cats
 
-    logging.info(f'file: {yolo_file_save_path} has {done} images')
-    return bbox_wh_img_size
+    def calculate_anchor_box(self, bbox_wh_img_size):
+        w_h = tuple(
+            (
+                box[0] / box[2] * self.size,
+                box[1] / box[3] * self.size,
+            )
+            for box in bbox_wh_img_size
+        )
+
+        self.anchors_tiny = self.calculate_kmeans(w_h, 6)
+        self.anchors = self.calculate_kmeans(w_h, 9)
+        self.anchors_v3 = self.anchors
+
+    @staticmethod
+    def calculate_kmeans(w_h, k):
+        x = np.array(w_h)
+        kmeans = KMeans(n_clusters=k).fit(x)
+        cluster = kmeans.cluster_centers_
+        boxes_size = [box[0] * box[1] for box in cluster]
+        sort_args = np.argsort(boxes_size)
+        arranged_cluster = np.zeros_like(cluster, int)
+
+        for i, arg in enumerate(sort_args):
+            arranged_cluster[i] = cluster[arg]
+
+        return arranged_cluster.reshape(-1).tolist()
+
+    def write_yolo_config(self):
+        self.yolo_config = {
+            'name': self.name,
+            'model_path': self.model_save_dir.as_posix(),
+            'weight_path': (self.weights_save_dir / self.name).with_suffix('.h5').as_posix(),
+            'logdir': self.logdir.as_posix(),
+            'frame_work': self.frame_work,
+            'model_type': self.model_type,
+            'size': self.size,
+            'tiny': self.tiny,
+            'max_output_size_per_class': 40,
+            'max_total_size': 50,
+            'iou_threshold': 0.5,
+            'score_threshold': self.score_threshold,
+            'YOLO': {
+                'CLASSES': self.classes,
+                'ANCHORS': self.anchors,
+                'ANCHORS_V3': self.anchors_v3,
+                'ANCHORS_TINY': self.anchors_tiny,
+                'STRIDES': [8, 16, 32],
+                'STRIDES_TINY': [16, 32],
+                'XYSCALE': [1.2, 1.1, 1.05],
+                'XYSCALE_TINY': [1.05, 1.05],
+                'ANCHOR_PER_SCALE': 3,
+                'IOU_LOSS_THRESH': 0.5,
+            },
+            'TRAIN': {
+                'ANNOT_PATH': self.train_bbox_file.as_posix(),
+                'BATCH_SIZE': self.batch_size,
+                'INPUT_SIZE': self.size,
+                'DATA_AUG': True,
+                'LR_INIT': 1e-03,
+                'LR_END': 1e-06,
+                'WARMUP_EPOCHS': self.warmup_epochs,
+                'INIT_EPOCH': 0,
+                'FIRST_STAGE_EPOCHS': self.first_stage_epochs,
+                'SECOND_STAGE_EPOCHS': self.second_stage_epochs,
+                'PRETRAIN': self.pretrain_file.as_posix() if self.pretrain_file else None,
+            },
+            'TEST': {
+                'ANNOT_PATH': self.test_bbox_file.as_posix(),
+                'BATCH_SIZE': self.batch_size,
+                'INPUT_SIZE': self.size,
+                'DATA_AUG': False,
+                'SCORE_THRESHOLD': self.score_threshold,
+                'IOU_THRESHOLD': 0.5,
+            }
+        }
+
+        with self.yolo_config_file.open('w') as f:
+            json.dump(self.yolo_config, f)
+
+        if sys.platform.startswith('linux'):
+            cmd = 'python3 -m json.tool %s' % (str(self.yolo_config_file.absolute()))
+        else:
+            cmd = 'python -m json.tool %s' % (str(self.yolo_config_file.absolute()))
+        os.system(cmd)
+        log.info(f'Write YOLO Config to {self.yolo_config_file.absolute()}')
 
 
-def Main(args):
-    config = {
-        # path
-        'name': None,
-        'model_path': None,
-        'weight_path': None,
-
-        # work environment
-        'frame_work': None,
-        'model_type': None,
-        'size': None,
-        'tiny': None,
-        'max_output_size_per_class': 20,
-        'max_total_size': 50,
-        'iou_threshold': 0.25,
-        'score_threshold': 0.5,
-
-        # yolo option
-        'YOLO': {
-            'CLASSES': None,
-            'ANCHORS': None,
-            'ANCHORS_V3': None,
-            'ANCHORS_TINY': None,
-            'STRIDES': [8, 16, 32],
-            'STRIDES_TINY': [16, 32],
-            'XYSCALE': [1.2, 1.1, 1.05],
-            'XYSCALE_TINY': [1.05, 1.05],
-            'ANCHOR_PER_SCALE': 3,
-            'IOU_LOSS_THRESH': 0.5,
-        },
-
-        # TRAIN
-        'TRAIN': {
-            'ANNOT_PATH': None,
-            'BATCH_SIZE': 2,
-            'INPUT_SIZE': None,
-            'DATA_AUG': True,
-            'LR_INIT': 1e-3,
-            'LR_END': 1e-6,
-            'WARMUP_EPOCHS': 2,
-            'FISRT_STAGE_EPOCHS': 20,
-            'SECOND_STAGE_EPOCHS': 30,
-            'PRETRAIN': None,
-        },
-
-        # TEST
-        'TEST': {
-            'ANNOT_PATH': None,
-            'BATCH_SIZE': 2,
-            'INPUT_SIZE': None,
-            'DATA_AUG': False,
-            'SCORE_THRESHOLD': 0.25,
-            'IOU_THRESHOLD': 0.5,
-        },
-    }
-    name = args.name
-    # path
-    paths = configparser.ConfigParser()
-    paths.read('sys.ini')
-    train_set_dir = paths['Annotations']['train_set_dir']
-    train_anno_path = paths['Annotations']['train_annotation_path']
-    val_set_dir = paths['Annotations']['val_set_dir']
-    val_anno_path = paths['Annotations']['val_annotation_path']
-
-    model_path = Path(paths['Save_dir']['checkpoints']) / name
-    weight_path = Path(paths['Save_dir']['weights']) / (name + '.h5')
-    train_yolo_format_save_path = Path(paths['Save_dir']['train_processed_data']) / (name + '.txt')
-    val_yolo_format_save_path = Path(paths['Save_dir']['test_processed_data']) / (name + '.txt')
-    config_save_path = Path(paths['Save_dir']['yolo_config_path']) / (name + '.json')
-    pretrain_weight_path = Path(args.pretrain)
-
-    if not pretrain_weight_path.is_file():
-        pretrain_weight_path = None
-
-    train_epoch_size = args.train_size
-    val_epoch_size = args.test_size
-    classes = load_class(args.classes)
-
-    p1 = (
-        str(train_anno_path),
-        classes,
-        train_set_dir,
-        train_yolo_format_save_path,
-        train_epoch_size,
-        name,
-        True
-    )
-
-    p2 = (
-        str(val_anno_path),
-        classes,
-        val_set_dir,
-        val_yolo_format_save_path,
-        val_epoch_size,
-    )
-
-    with Pool(cpu_count()) as p:
-        _, bbox_wh_img_size = p.starmap(write_coco2yolo_file, (p1, p2))
-
-    classes_file_path = Path('data') / 'classes' / (name + '.txt')
-    if not classes_file_path.is_file():
-        raise Exception('Cant handle this data set please check out the classes name file')
-    with classes_file_path.open() as f:
-        classes = json.load(f)
-
-    anchor = calculate_anchor_box(bbox_wh_img_size, size=args.size)
-    classes = [_class for _class in classes.keys()]
-
-    config['name'] = name
-    config['model_path'] = str(model_path)
-    config['weight_path'] = str(weight_path)
-    config['frame_work'] = args.frame_work
-    config['size'] = args.size
-    config['model_type'] = args.model_type
-    config['tiny'] = args.tiny
-    config['YOLO']['CLASSES'] = classes
-    config['YOLO']['ANCHORS'] = anchor[0]
-    config['YOLO']['ANCHORS_V3'] = anchor[0]
-    config['YOLO']['ANCHORS_TINY'] = anchor[1]
-    config['TRAIN']['ANNOT_PATH'] = str(train_yolo_format_save_path)
-    config['TRAIN']['INPUT_SIZE'] = args.size
-    config['TRAIN']['BATCH_SIZE'] = args.batch_size
-    config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch
-    config['TRAIN']['PRETRAIN'] = str(pretrain_weight_path)
-    config['TEST']['ANNOT_PATH'] = str(val_yolo_format_save_path)
-    config['TEST']['INPUT_SIZE'] = args.size
-    config['TEST']['BATCH_SIZE'] = args.batch_size
-
-    if not config['TRAIN']['PRETRAIN']:
-        config['TRAIN']['FISRT_STAGE_EPOCHS'] = 20
-    else:
-        config['TRAIN']['SECOND_STAGE_EPOCHS'] = args.epoch - 20
-
-    print('-------------------CONFIG-------------------')
-    printdic(config)
-    print('--------------------END---------------------')
-    write_config(config, dst=str(config_save_path))
+def main(args):
+    try:
+        myc = MakeYoloConfig(
+            args.name,
+            args.classes,
+            sys_config_path='./sys.ini',
+            size=args.size,
+            model_type=args.model,
+            frame_work=args.frame_work,
+            tiny=args.tiny,
+            pretrain_file_path=args.pretrain,
+            batch_size=args.batch_size,
+            epoch=args.epoch,
+            train_size=args.train_size,
+            val_size=args.val_size,
+            score_threshold=args.score_threshold
+        )
+        myc.make()
+    except Exception as E:
+        log.error(f'{E.__class__.__name__}({E.args})', exc_info=True)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Make yolo config and preprocess dataset')
-    parser.add_argument('-n', '--name', required=False, type=str, help='Model name')
-    parser.add_argument('-c', '--classes', required=True, type=str, help='Classes name file path')
+    log.basicConfig(
+        format='%(asctime)s %(levelname)s: %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S',
+        level=log.INFO
+    )
+
+    parser = argparse.ArgumentParser(description='Make YOLO config file')
+    parser.add_argument('-n', '--name', required=False, type=str, help='Config file and model name')
+    parser.add_argument('-c', '--classes', required=True, type=str, help='Classes file path')
     parser.add_argument('-s', '--size', type=int, default=416,
                         choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
-                        help='Image input size')
+                        help='Image detect size')
     parser.add_argument('-m', '--model', type=str, default='yolov4', choices=['yolov4', 'yolov3'], help='Model type')
     parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
-                        help='Frame work')
+                        help='Frame work type')
+    parser.add_argument('-sc', '--score_threshold', type=float, default=0.25, help='Object score threshold')
     parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('-p', '--pretrain', type=str, help='Pretrain weight path')
+    parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
     parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
     parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
     parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
     parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
     args = parser.parse_args()
-    Main(args)
+    main(args)
