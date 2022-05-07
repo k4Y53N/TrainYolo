@@ -1,11 +1,12 @@
-import tensorflow as tf
-import numpy as np
-import argparse
-from core.yolov4 import YOLO, compute_loss, decode_train
+from core.yolov4 import compute_loss
 from core.utils import freeze_all, unfreeze_all
 from core.dataset import Dataset
 from core.configer import YOLOConfiger
 from core import utils
+from core.models import build_model
+import tensorflow as tf
+import numpy as np
+import argparse
 
 
 def main(config_path):
@@ -24,55 +25,25 @@ def main(config_path):
     iou_loss_thresh = configer.iou_loss_thresh
     lr_init = configer.lr_init
     lr_end = configer.lr_end
-    size = configer.size
     warmup_steps = configer.warmup_epochs * steps_per_epoch
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
     global_steps = tf.Variable(init_epoch * steps_per_epoch + 1, trainable=False, dtype=tf.int64)
-    input_layer = tf.keras.layers.Input([size, size, 3])
     strides = configer.strides
-    anchors = configer.anchors
     num_class = configer.num_class
-    xyscale = configer.xyscale
     freeze_layers = configer.freeze_layers
-    feature_maps = YOLO(input_layer, num_class, configer.model_type, configer.tiny)
-
     pretrain_path = configer.pre_train_file_path
     weight_path = configer.weight_path
     model_path = configer.model_path
-    if tiny:
-        bbox_tensors = []
-        for i, fm in enumerate(feature_maps):
-            if i == 0:
-                bbox_tensor = decode_train(fm, size // 16, num_class, strides, anchors, i,
-                                           xyscale)
-            else:
-                bbox_tensor = decode_train(fm, size // 32, num_class, strides, anchors, i,
-                                           xyscale)
-            bbox_tensors.append(fm)
-            bbox_tensors.append(bbox_tensor)
-    else:
-        bbox_tensors = []
-        for i, fm in enumerate(feature_maps):
-            if i == 0:
-                bbox_tensor = decode_train(fm, size // 8, num_class, strides, anchors, i,
-                                           xyscale)
-            elif i == 1:
-                bbox_tensor = decode_train(fm, size // 16, num_class, strides, anchors, i,
-                                           xyscale)
-            else:
-                bbox_tensor = decode_train(fm, size // 32, num_class, strides, anchors, i,
-                                           xyscale)
-            bbox_tensors.append(fm)
-            bbox_tensors.append(bbox_tensor)
-
-    model = tf.keras.Model(input_layer, bbox_tensors)
+    model = build_model(configer, training=True)
 
     if pretrain_path:
-        if pretrain_path.endswith('weights'):
+        if configer.init_epoch == 0:
+            if not pretrain_path.endswith('.weights'):
+                raise RuntimeError('First epoch only support load .weights file not .h5 file')
             utils.load_weights(model, pretrain_path, model_type, tiny)
         else:
             model.load_weights(pretrain_path)
-        print('Train from %s' % (pretrain_path))
+        print('Train from %s' % pretrain_path)
     else:
         print("Training from scratch")
 
@@ -97,7 +68,7 @@ def main(config_path):
 
             gradients = tape.gradient(total_loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            print("\r=> STEP %4d/%4d   epoch: %d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
+            print("\r=> train step: %4d/%4d   epoch: %d   lr: %.6f   giou_loss: %4.2f   conf_loss: %4.2f   "
                   "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, total_steps, epoch, optimizer.lr.numpy(),
                                                             giou_loss, conf_loss,
                                                             prob_loss, total_loss), end='', flush=True)
@@ -136,7 +107,7 @@ def main(config_path):
 
             total_loss = giou_loss + conf_loss + prob_loss
 
-            print("\r=> TEST STEP %4d  epoch: %d  giou_loss: %4.2f   conf_loss: %4.2f   "
+            print("\r=> test step %4d  epoch: %d  giou_loss: %4.2f   conf_loss: %4.2f   "
                   "prob_loss: %4.2f   total_loss: %5.2f" % (global_steps, epoch, giou_loss, conf_loss,
                                                             prob_loss, total_loss), end='', flush=True)
 
@@ -160,7 +131,6 @@ def main(config_path):
             test_step(image_data, target, epoch + 1)
         print()
         model.save_weights(weight_path)
-        # model.save(model_path)
         configer.update_pre_train_file_path(weight_path)
         configer.update_init_epoch(epoch + 1)
         configer.save()
@@ -169,6 +139,6 @@ def main(config_path):
 
 if __name__ == '__main__':
     paser = argparse.ArgumentParser(description='Train model using config file')
-    paser.add_argument('--config', type=str, help='config file path')
+    paser.add_argument('config', type=str, help='config file path')
     args = paser.parse_args()
     main(args.config)
