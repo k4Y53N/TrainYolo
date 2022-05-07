@@ -67,14 +67,14 @@ class MakeYoloConfig:
 
     def make(self):
         self.check_all_paths()
-        self.load_classes()
+        classes = self.load_classes()
         train = Thread(
             target=self.write,
-            args=(self.train_annotation_file, self.train_bbox_file, True)
+            args=(self.train_annotation_file, self.train_bbox_file, classes, True)
         )
         test = Thread(
             target=self.write,
-            args=(self.test_annotation_file, self.test_bbox_file, False)
+            args=(self.test_annotation_file, self.test_bbox_file, classes, False)
         )
         train.start()
         test.start()
@@ -130,6 +130,11 @@ class MakeYoloConfig:
             self.logdir
         )
 
+        rm_files = (
+            self.train_bbox_file,
+            self.test_bbox_file
+        )
+
         for ex_dir in checking_exist_dir_group:
             if not ex_dir.is_dir():
                 raise NotADirectoryError(ex_dir.absolute())
@@ -141,6 +146,12 @@ class MakeYoloConfig:
         for mk_dir in make_dirs:
             if not mk_dir.is_dir():
                 os.makedirs(mk_dir.absolute(), exist_ok=True)
+                log.info('Make dir %s' % str(mk_dir.absolute()))
+
+        for rm_file in rm_files:
+            if rm_file.is_file():
+                rm_file.unlink(missing_ok=True)
+                log.info('Remove exist file: %s' % str(rm_file.absolute()))
 
         if self.pretrain_file:
             if not self.pretrain_file.is_file():
@@ -148,18 +159,19 @@ class MakeYoloConfig:
 
     def load_classes(self):
         with self.classes_file.open('r') as f:
-            self.classes = [line.strip() for line in f.readlines()]
+            classes = [line.strip() for line in f.readlines()]
+        return classes
 
-    def write(self, annotation_file: Path, bbox_file: Path, training: bool):
+    def write(self, annotation_file: Path, bbox_file: Path, classes: list, training: bool):
         try:
-            self.write_coco2yolo(annotation_file, bbox_file, training)
+            self.write_coco2yolo(annotation_file, bbox_file, classes, training)
         except Exception as e:
             log.error(f'{e.__class__.__name__}({e.args})', exc_info=True)
             self.train_bbox_file.unlink(missing_ok=True)
             self.test_bbox_file.unlink(missing_ok=True)
 
-    def write_coco2yolo(self, annotation_file: Path, bbox_file: Path, training: bool):
-        images, classes = self.load_annotation_file(annotation_file)
+    def write_coco2yolo(self, annotation_file: Path, bbox_file: Path, classes: list, training: bool):
+        images, classes = self.load_annotation_file(annotation_file, classes)
         classes = {
             class_name: index
             for index, class_name in enumerate(classes)
@@ -213,7 +225,7 @@ class MakeYoloConfig:
             self.calculate_anchor_box(anchor_boxes)
             self.classes = list(classes.keys())
 
-    def load_annotation_file(self, file: Path):
+    def load_annotation_file(self, file: Path, classes: list):
         log.info(f'Start loading annotation file: {file.absolute()}')
         if file.suffix == '.pickle':
             with file.open('rb') as f:
@@ -229,12 +241,12 @@ class MakeYoloConfig:
             raise RuntimeError('Unknown file suffix')
 
         log.info(f'loading annotation file: {file.absolute()} finish')
-        return self._filter(data)
+        return self._filter(data, classes)
 
-    def _filter(self, data):
+    def _filter(self, data, classes: list):
         cats = {
             cat['id']: cat['name']
-            for cat in data['categories'] if cat['name'] in self.classes
+            for cat in data['categories'] if cat['name'] in classes
         }
 
         if len(cats) < 1:
