@@ -41,7 +41,7 @@ class MakeYoloConfig:
         self.epoch = epoch
         self.warmup_epochs = 2
         self.first_stage_epochs = int(epoch * 1 / 5) if pretrain_file_path else 0
-        self.second_stage_epochs = epoch
+        self.second_stage_epochs = epoch - self.first_stage_epochs
         self.train_size = train_size
         self.test_size = val_size
         self.tiny = tiny
@@ -81,11 +81,7 @@ class MakeYoloConfig:
         train.join()
         test.join()
 
-        if self.train_bbox_file.is_file() and self.test_bbox_file.is_file():
-            self.yolo_config['name'] = self.name
-            self.yolo_config['model_path'] = self.model_type
-        else:
-            self.yolo_config_file.unlink(missing_ok=True)
+        if not (self.train_bbox_file.is_file() and self.test_bbox_file.is_file()):
             self.train_bbox_file.unlink(missing_ok=True)
             self.test_bbox_file.unlink(missing_ok=True)
             raise RuntimeError('Writing Train bbox file or Test box file fail')
@@ -126,6 +122,7 @@ class MakeYoloConfig:
         )
 
         make_dirs = (
+            self.configs_save_dir,
             self.checkpoints_save_dir,
             self.weights_save_dir,
             self.train_bbox_save_dir,
@@ -158,10 +155,8 @@ class MakeYoloConfig:
             self.write_coco2yolo(annotation_file, bbox_file, training)
         except Exception as e:
             log.error(f'{e.__class__.__name__}({e.args})', exc_info=True)
-            if training:
-                self.train_bbox_file.unlink(missing_ok=True)
-            else:
-                self.test_bbox_file.unlink(missing_ok=True)
+            self.train_bbox_file.unlink(missing_ok=True)
+            self.test_bbox_file.unlink(missing_ok=True)
 
     def write_coco2yolo(self, annotation_file: Path, bbox_file: Path, training: bool):
         images, classes = self.load_annotation_file(annotation_file)
@@ -219,23 +214,21 @@ class MakeYoloConfig:
             self.classes = list(classes.keys())
 
     def load_annotation_file(self, file: Path):
+        log.info(f'Start loading annotation file: {file.absolute()}')
         if file.suffix == '.pickle':
             with file.open('rb') as f:
-                log.info(f'Start loading annotation file: {file.absolute()}')
                 data = pickle.load(f)
                 np.random.shuffle(data['images'])
                 np.random.shuffle(data['annotations'])
-                log.info(f'loading annotation file: {file.absolute()} finish')
         elif file.suffix == '.json':
             with file.open('r') as f:
-                log.info(f'Start loading annotation file: {file.absolute()}')
                 data = json.load(f)
                 np.random.shuffle(data['images'])
                 np.random.shuffle(data['annotations'])
-                log.info(f'loading annotation file: {file.absolute()} finish')
         else:
             raise RuntimeError('Unknown file suffix')
 
+        log.info(f'loading annotation file: {file.absolute()} finish')
         return self._filter(data)
 
     def _filter(self, data):
@@ -253,13 +246,13 @@ class MakeYoloConfig:
         )
 
         images = {
-            img['id']: {
-                'file_name': img['file_name'],
-                'width': img['width'],
-                'height': img['height'],
+            image['id']: {
+                'file_name': image['file_name'],
+                'width': image['width'],
+                'height': image['height'],
                 'items': []
             }
-            for img in data['images']
+            for image in data['images']
         }
 
         for anno in annos:
@@ -366,7 +359,30 @@ class MakeYoloConfig:
         log.info(f'Write YOLO Config to {self.yolo_config_file.absolute()}')
 
 
-def main(args):
+if __name__ == '__main__':
+    log.basicConfig(
+        format='%(asctime)s %(levelname)s: %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S',
+        level=log.INFO
+    )
+
+    parser = argparse.ArgumentParser(description='Make YOLO config file')
+    parser.add_argument('name', type=str, help='Config file and model name')
+    parser.add_argument('classes', type=str, help='Classes file path')
+    parser.add_argument('-s', '--size', type=int, default=416,
+                        choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
+                        help='Image detect size')
+    parser.add_argument('-m', '--model', type=str, default='yolov4', choices=['yolov4', 'yolov3'], help='Model type')
+    parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
+                        help='Frame work type')
+    parser.add_argument('-sc', '--score_threshold', type=float, default=0.25, help='Object score threshold')
+    parser.add_argument('-t', '--tiny', action='store_true', help='Tiny model?')
+    parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
+    parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
+    parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
+    parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
+    parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
+    args = parser.parse_args()
     try:
         myc = MakeYoloConfig(
             args.name,
@@ -386,30 +402,3 @@ def main(args):
         myc.make()
     except Exception as E:
         log.error(f'{E.__class__.__name__}({E.args})', exc_info=True)
-
-
-if __name__ == '__main__':
-    log.basicConfig(
-        format='%(asctime)s %(levelname)s: %(message)s',
-        datefmt='%Y/%m/%d %H:%M:%S',
-        level=log.INFO
-    )
-
-    parser = argparse.ArgumentParser(description='Make YOLO config file')
-    parser.add_argument('-n', '--name', required=False, type=str, help='Config file and model name')
-    parser.add_argument('-c', '--classes', required=True, type=str, help='Classes file path')
-    parser.add_argument('-s', '--size', type=int, default=416,
-                        choices=[320, 352, 384, 416, 448, 480, 512, 544, 576, 608],
-                        help='Image detect size')
-    parser.add_argument('-m', '--model', type=str, default='yolov4', choices=['yolov4', 'yolov3'], help='Model type')
-    parser.add_argument('-f', '--frame_work', type=str, default='tf', choices=['tf', 'trt', 'tflite'],
-                        help='Frame work type')
-    parser.add_argument('-sc', '--score_threshold', type=float, default=0.25, help='Object score threshold')
-    parser.add_argument('-t', '--tiny', type=bool, default=False, help='Tiny model?')
-    parser.add_argument('-p', '--pretrain', type=str, default='', help='Pretrain weight path')
-    parser.add_argument('-bs', '--batch_size', type=int, default=4, help='Batch size')
-    parser.add_argument('-ep', '--epoch', type=int, default=30, help='Total of epoch')
-    parser.add_argument('-ts', '--train_size', type=int, default=1000, help='Train epoch size')
-    parser.add_argument('-vs', '--val_size', type=int, default=200, help='Val epoch size')
-    args = parser.parse_args()
-    main(args)
