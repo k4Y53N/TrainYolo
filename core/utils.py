@@ -1,11 +1,6 @@
 import cv2
-import random
-import colorsys
 import numpy as np
 import tensorflow as tf
-
-
-# from core.config import cfg
 
 
 def load_freeze_layer(model='yolov4', tiny=False):
@@ -76,11 +71,6 @@ def load_weights(model, weights_file, model_name='yolov4', is_tiny=False):
     wf.close()
 
 
-"""
-***
-"""
-
-
 def read_class_names(classes):
     names = {}
     for index, name in enumerate(classes):
@@ -135,10 +125,6 @@ def image_preprocess(image, target_size, gt_boxes=None):
         gt_boxes[:, [1, 3]] = gt_boxes[:, [1, 3]] * scale + dh
         return image_paded, gt_boxes
 
-
-"""
-***
-"""
 
 """def draw_bbox(image, bboxes, classes=read_class_names(cfg.YOLO.CLASSES), show_label=True):
     num_classes = len(classes)
