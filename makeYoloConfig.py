@@ -252,11 +252,6 @@ class MakeYoloConfig:
         if len(cats) < 1:
             raise RuntimeError('Can not find any classes in annotation file')
 
-        annos = (
-            anno for anno in data['annotations']
-            if anno['category_id'] in cats.keys()
-        )
-
         images = {
             image['id']: {
                 'file_name': image['file_name'],
@@ -267,14 +262,15 @@ class MakeYoloConfig:
             for image in data['images']
         }
 
-        for anno in annos:
-            image_id = anno['image_id']
-            images[image_id]['items'].append(
-                {
-                    'bbox': anno['bbox'],
-                    'category_name': cats[anno['category_id']]
-                }
-            )
+        for anno in data['annotations']:
+            if anno['category_id'] in cats.keys():
+                image_id = anno['image_id']
+                images[image_id]['items'].append(
+                    {
+                        'bbox': anno['bbox'],
+                        'category_name': cats[anno['category_id']]
+                    }
+                )
 
         images = (
             img for img in images.values() if len(img['items']) > 0
